@@ -1,8 +1,16 @@
 import { Hono } from "hono";
+import skillMd from "./skill.md?raw";
 
 const app = new Hono<{ Bindings: Env }>();
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+// ---------------------------------------------------------------------------
+// skill.md — Agent 接入指令（显式 charset=utf-8 避免中文乱码）
+// ---------------------------------------------------------------------------
+app.get("/skill.md", (c) =>
+  c.body(skillMd, 200, { "Content-Type": "text/markdown; charset=utf-8" })
+);
 
 // ---------------------------------------------------------------------------
 // 健康检查
