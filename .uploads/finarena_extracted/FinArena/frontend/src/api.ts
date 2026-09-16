@@ -1,0 +1,488 @@
+import type {
+  AgentMeta,
+  ArenaComputeResult,
+  ArenaItem,
+  Artifact,
+  BTDataset,
+  BTEventCatalogItem,
+  BTEventStatus,
+  BTMetricDef,
+  BTMetricsV2,
+  BTPredictionDetail,
+  BTPredictionItem,
+  BTRun,
+  BTRunner,
+  BTSSEEvent,
+  BTEventsCount,
+  BTPromptVariant,
+  CaseDetail,
+  CaseItem,
+  KlinePayload,
+  Mode,
+  SkillMeta,
+  SuggestionItem,
+  SSEEvent,
+} from "./types";
+
+const BASE = "/api";
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = BASE + path;
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const ct = res.headers.get("content-type") ?? "";
+  // clone 一份以便 JSON.parse 失败时还能兜底读文本（用于错误信息）
+  const resClone = res.clone();
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      if (ct.includes("application/json")) {
+        const body = await res.json();
+        if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      } else {
+        const text = await res.text();
+        const snippet = text.slice(0, 160).replace(/\s+/g, " ");
+        if (snippet.trim()) detail += ` · body=${snippet}`;
+      }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  try {
+    return (await res.json()) as T;
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    let bodySnippet = "";
+    try { bodySnippet = (await resClone.text()).slice(0, 120).replace(/\s+/g, " "); } catch { /* ignore */ }
+    const isHTML = ct.includes("text/html") || /<\s*!doctype|<\s*html/i.test(errMsg) || /<\s*!doctype/i.test(bodySnippet);
+    let hint = "";
+    if (isHTML) {
+      hint = "后端未返回 JSON。常见原因：①后端服务版本过旧，缺少该路由（重启 uvicorn 重新加载代码）；②Vite 代理未转发到后端导致返回了 SPA index.html（检查 vite.config.ts proxy 与 :8000 后端进程是否存活）；③后端崩溃后 fallback 到错误页。";
+    } else if (ct && !ct.includes("json")) {
+      hint = `响应 Content-Type=${ct}，非 application/json`;
+    }
+    const urlCT = `url=${url} status=${res.status} ct=${ct || "(missing)"}`;
+    const parsedSnippet = /Unexpected token '([^']+)'/.exec(errMsg)?.[1] ?? "";
+    const snipInfo = parsedSnippet ? ` first-token=${JSON.stringify(parsedSnippet.slice(0, 24))}` : "";
+    const bodyInfo = bodySnippet ? ` body-head=${JSON.stringify(bodySnippet)}` : "";
+    throw new Error(`API 响应解析失败：${errMsg} · ${urlCT}${snipInfo}${bodyInfo} ${hint}`.trim());
+  }
+}
+
+export const api = {
+  skills: () => req<SkillMeta[]>("/skills"),
+  agents: () => req<AgentMeta[]>("/agents"),
+  suggestions: () => req<{ items: SuggestionItem[]; source: string; fallback: boolean }>("/suggestions"),
+  cases: () => req<CaseItem[]>("/cases"),
+  createCase: (title?: string) =>
+    req<CaseItem>("/cases", { method: "POST", body: JSON.stringify(title ? { title } : {}) }),
+  caseDetail: (id: string) => req<CaseDetail>(`/cases/${id}`),
+  deleteCase: (id: string) => req<{ ok: boolean }>(`/cases/${id}`, { method: "DELETE" }),
+  pinArtifact: (caseId: string, artifactId: string) =>
+    // 后端 toggle_pin 返回完整 artifact（含最新 pinned 字段）
+    req<Artifact>(`/cases/${caseId}/artifacts/${artifactId}/pin`, {
+      method: "POST",
+      body: "{}",
+    }),
+  genReport: (caseId: string) =>
+    req<Artifact>(`/cases/${caseId}/report`, { method: "POST", body: "{}" }),
+  logicAutoCheck: (item: {
+    hypothesis: string;
+    category?: string;
+    scope?: string;
+    horizon?: string;
+    check?: string;
+    question?: string;
+  }) =>
+    fetch(`${BASE}/logic/auto_check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(item),
+    }).then(async (r) => {
+      if (!r.ok) {
+        let detail = `auto_check ${r.status}`;
+        try {
+          const j = await r.json();
+          if (j?.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+        } catch { /* ignore */ }
+        throw new Error(detail);
+      }
+      return (await r.json()) as {
+        verdict: "verified" | "rejected" | "inconclusive" | "pending_scheduled" | "error";
+        status: string;
+        reasoning: string;
+        evidence: Array<{ skill: string; args?: Record<string, unknown>; ok?: boolean; summary?: string }>;
+        data_summary: string;
+        next_check_at: string | null;
+        ran_at: string;
+      };
+    }),
+
+  /* ===================================== Backtest (P0) ===================================== */
+
+  btRuns: (limit = 100) =>
+    req<{ total: number; items: BTRun[] }>(`/bt/runs?limit=${limit}`),
+
+  btCreateRun: (data: {
+    name: string;
+    runner: BTRunner | string;
+    dataset_id?: string;
+    events_path?: string;
+    labels_path?: string;
+    prompt_variant?: string;
+    model_version?: string;
+    concurrency?: number;
+    config?: Record<string, unknown>;
+  }) =>
+    req<BTRun>("/bt/runs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  btGetRun: (runId: string) => req<BTRun>(`/bt/runs/${runId}`),
+
+  btDeleteRun: (runId: string) =>
+    req<{ ok: boolean; run_id?: string; message?: string }>(`/bt/runs/${runId}`, { method: "DELETE" }),
+
+  btStartRun: (runId: string) =>
+    req<{ ok: boolean; run_id?: string; message?: string }>(`/bt/runs/${runId}/start`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  btCancelRun: (runId: string) =>
+    req<{ ok: boolean; run_id?: string; message?: string }>(`/bt/runs/${runId}/cancel`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  btPauseRun: (runId: string) =>
+    req<{ ok: boolean; run_id?: string; message?: string }>(`/bt/runs/${runId}/pause`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  btResumeRun: (runId: string) =>
+    req<{ ok: boolean; run_id?: string; message?: string }>(`/bt/runs/${runId}/resume`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  btListEvents: (runId: string, params?: {
+    page?: number;
+    page_size?: number;
+    market?: string;
+    event_type_l2?: string;
+    only_incorrect?: boolean;
+  }) => {
+    const p = new URLSearchParams();
+    if (params?.page) p.set("page", String(params.page));
+    if (params?.page_size) p.set("page_size", String(params.page_size));
+    if (params?.market) p.set("market", params.market);
+    if (params?.event_type_l2) p.set("event_type_l2", params.event_type_l2);
+    if (params?.only_incorrect) p.set("only_incorrect", "1");
+    const qs = p.toString();
+    return req<{
+      total: number;
+      page: number;
+      page_size: number;
+      items: BTPredictionItem[];
+    }>(`/bt/runs/${runId}/events${qs ? "?" + qs : ""}`);
+  },
+
+  /** 事件目录（推荐用于 Detail 页事件列表）：从 events JSONL 返回全部 N 条待处理事件 + status + 已完成 prediction。
+   *  与 btListEvents 最大区别：pending/processing 的事件一开始就会渲染，不再等 prediction 写入 DB。
+   */
+  btListEventCatalog: (runId: string, params?: {
+    market?: string;
+    event_type_l2?: string;
+    only_incorrect?: boolean;
+    status?: BTEventStatus;
+  }) => {
+    const p = new URLSearchParams();
+    if (params?.market) p.set("market", params.market);
+    if (params?.event_type_l2) p.set("event_type_l2", params.event_type_l2);
+    if (params?.only_incorrect) p.set("only_incorrect", "1");
+    if (params?.status) p.set("status", params.status);
+    const qs = p.toString();
+    return req<{ total: number; items: BTEventCatalogItem[] }>(
+      `/bt/runs/${runId}/events-catalog${qs ? "?" + qs : ""}`,
+    );
+  },
+
+  /** 单条 case 详情（GET /runs/{rid}/events/{eid}）：返回 prediction 行 + trajectory ckpt（如果是 team_full） */
+  btGetPredictionDetail: (runId: string, eventId: string) =>
+    req<BTPredictionDetail>(`/bt/runs/${runId}/events/${eventId}`),
+
+  /** 单事件 K 线行情（GET /runs/{rid}/events/{eid}/kline）：按 symbol 拉事件日前后日K，返回 KlinePayload */
+  btGetEventKline: (runId: string, eventId: string) =>
+    req<{ ok: boolean; payload?: KlinePayload; error?: string }>(
+      `/bt/runs/${runId}/events/${eventId}/kline`,
+    ),
+
+  btGetMetrics: (runId: string) => req<BTMetricsV2>(`/bt/runs/${runId}/metrics`),
+
+  /** 列出已注册的指标元信息（display_name / tier / higher_is_better），用于前端动态渲染。 */
+  btMetricDefs: () => req<Record<string, BTMetricDef>>("/bt/metrics/defs"),
+
+  /** 列出 bt_datasets 中已注册的数据集（Data list 下拉用），附带 market/type/symbol 分布 & labels_path。 */
+  btListDatasets: () => req<BTDataset[]>("/bt/datasets"),
+
+  /** 列出 prompt 变体：baseline/team_prompt/team_full，附带完整 prompt_text */
+  btPromptVariants: (runner = "team_prompt") =>
+    req<BTPromptVariant[]>(`/bt/prompt-variants?runner=${encodeURIComponent(runner)}`),
+
+  /** 校验 events 文件并返回事件数 */
+  btEventsCount: (path: string) =>
+    req<BTEventsCount>(`/bt/events-count?path=${encodeURIComponent(path)}`),
+
+  /** 校验 labels 文件并返回数量；若传 events_path 则额外对比 event_id 覆盖率 */
+  btLabelsCount: (path: string, eventsPath?: string) => {
+    const qs = new URLSearchParams({ path });
+    if (eventsPath?.trim()) qs.set("events_path", eventsPath.trim());
+    return req<BTEventsCount>(`/bt/labels-count?${qs.toString()}`);
+  },
+
+  /* ===================================== Arena 横向比对 ===================================== */
+
+  /** 列出所有 Arena 比对实验 */
+  arenaList: (limit = 100) =>
+    req<{ total: number; items: ArenaItem[] }>(`/arena?limit=${limit}`),
+
+  /** 创建一个新 Arena（落库） */
+  arenaCreate: (data: {
+    name: string;
+    run_ids: string[];
+    dataset_id?: string;
+    description?: string;
+    selected_metric_ids?: string[];
+    config?: Record<string, unknown>;
+  }) =>
+    req<ArenaItem>("/arena", { method: "POST", body: JSON.stringify(data) }),
+
+  /** 获取单个 Arena */
+  arenaGet: (arenaId: string) => req<ArenaItem>(`/arena/${arenaId}`),
+
+  /** 删除 Arena */
+  arenaDelete: (arenaId: string) =>
+    req<{ ok: boolean; arena_id: string }>(`/arena/${arenaId}`, { method: "DELETE" }),
+
+  /** 即时计算比对（不落库，适合临时对比几个 run） */
+  arenaComputeInline: (data: { run_ids: string[]; selected_metric_ids?: string[] }) =>
+    req<ArenaComputeResult>("/arena/compute", { method: "POST", body: JSON.stringify(data) }),
+
+  /** 对已落库的 arena_id 触发计算并保存结果。返回更新后的 ArenaItem */
+  arenaComputeAndSave: (arenaId: string, data?: { run_ids?: string[]; selected_metric_ids?: string[] }) =>
+    req<ArenaItem>(`/arena/${arenaId}/compute`, {
+      method: "POST",
+      body: data ? JSON.stringify(data) : "{}",
+    }),
+
+  /**
+   * 对已落库的 arena 触发计算并直接返回 ComputeResult（便于详情页「计算完成后立刻展示结果」）。
+   * 等价于先 arenaComputeAndSave 再取返回的 arena.result；如果 arena.result 缺失，兜底调用一次 arenaGet。
+   */
+  arenaCompute: async (arenaId: string): Promise<ArenaComputeResult> => {
+    const arena = await api.arenaComputeAndSave(arenaId);
+    if (arena.result) return arena.result;
+    const fresh = await api.arenaGet(arenaId);
+    if (!fresh.result) {
+      throw new Error("Arena 计算完成，但后端未返回 result 字段。");
+    }
+    return fresh.result;
+  },
+};
+
+/* ==================== 回测 SSE 客户端（/api/bt/stream/{run_id}） ==================== */
+
+export interface BTStreamHandlers {
+  onEvent: (ev: BTSSEEvent) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * 订阅回测 SSE 进度流：GET /api/bt/stream/{run_id}
+ * 按 `\n\n` 分帧、逐行 `data: {json}` 解析，心跳帧透传给 onEvent。
+ */
+export async function streamBacktest(
+  runId: string,
+  { onEvent, signal }: BTStreamHandlers,
+): Promise<void> {
+  if (signal?.aborted) throw new StreamAbortedError();
+
+  const res = await fetch(`${BASE}/bt/stream/${runId}`, {
+    headers: { Accept: "text/event-stream" },
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const j = await res.json();
+      if (j?.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (!res.body) throw new Error("响应无流式内容");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  let aborted = false;
+
+  if (signal) {
+    if (signal.aborted) {
+      reader.cancel().catch(() => undefined);
+      throw new StreamAbortedError();
+    }
+    signal.addEventListener("abort", () => {
+      aborted = true;
+      reader.cancel().catch(() => undefined);
+    }, { once: true });
+  }
+
+  const handleFrame = (frame: string) => {
+    for (const line of frame.split("\n")) {
+      const trimmed = line.trimEnd();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        onEvent(JSON.parse(data) as BTSSEEvent);
+      } catch {
+        // 忽略坏帧
+      }
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (aborted) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        handleFrame(frame);
+        if (aborted) break;
+      }
+      if (aborted) break;
+    }
+  } catch (e) {
+    if (aborted || (e instanceof DOMException && e.name === "AbortError")) {
+      throw new StreamAbortedError();
+    }
+    throw e;
+  }
+  if (aborted) throw new StreamAbortedError();
+  if (buf.trim()) handleFrame(buf);
+}
+
+/** fetch 主动中止的标记（区别于真实网络错误），供 store 静默处理 */
+export class StreamAbortedError extends Error {
+  constructor() { super("stream-aborted"); this.name = "StreamAbortedError"; }
+}
+
+export interface StreamHandlers {
+  onEvent: (ev: SSEEvent) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * SSE 客户端（design.md §7 / §10）：
+ * fetch POST /api/chat + ReadableStream，按 `\n\n` 分帧、逐行 `data: {json}` 解析；
+ * AbortSignal → 立即 reader.cancel()，不向 fetch 传 signal，
+ * 避免浏览器把 in-flight 请求标记为 ERR_ABORTED 写到 Console。
+ */
+export async function streamChat(
+  body: {
+    case_id: string;
+    message: string;
+    mode: Mode;
+    agent?: string | null;
+    team_members?: string[] | null;
+  },
+  { onEvent, signal }: StreamHandlers,
+): Promise<void> {
+  // 进入前先看 signal；已 abort 则不发请求
+  if (signal?.aborted) throw new StreamAbortedError();
+  // 页面已隐藏（切 tab / 关闭 preview）时也别发请求 —— 浏览器随后会强 abort
+  // 留下 net::ERR_ABORTED 噪音；不如直接 throw 让 store 静默收尾。
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    throw new StreamAbortedError();
+  }
+
+  const res = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const j = await res.json();
+      if (j?.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  if (!res.body) throw new Error("响应无流式内容");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  let aborted = false;
+
+  // 监听外部 abort：立刻关闭 reader，fetch 自然结束（不会触发 ERR_ABORTED）
+  if (signal) {
+    if (signal.aborted) {
+      reader.cancel().catch(() => undefined);
+      throw new StreamAbortedError();
+    }
+    signal.addEventListener("abort", () => {
+      aborted = true;
+      reader.cancel().catch(() => undefined);
+    }, { once: true });
+  }
+
+  const handleFrame = (frame: string) => {
+    for (const line of frame.split("\n")) {
+      const trimmed = line.trimEnd();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        onEvent(JSON.parse(data) as SSEEvent);
+      } catch {
+        // 忽略坏帧，不中断流
+      }
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (aborted) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        handleFrame(frame);
+        if (aborted) break;
+      }
+      if (aborted) break;
+    }
+  } catch (e) {
+    if (aborted || (e instanceof DOMException && e.name === "AbortError")) {
+      throw new StreamAbortedError();
+    }
+    throw e;
+  }
+  if (aborted) throw new StreamAbortedError();
+  // 流末尾可能残留未以 \n\n 结尾的一帧
+  if (buf.trim()) handleFrame(buf);
+}
