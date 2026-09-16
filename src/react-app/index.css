@@ -362,3 +362,44 @@ small,.metric-agent small,.board-foot,.feed-list .index,.feed-list p,.question-s
 .fadeUp,.team-card.team-revealed{animation-timing-function:var(--ease-ghost)!important;animation-duration:.7s!important}
 /* Ghost Shell 补漏：压平高优先级旧渐变 */
 .quick-composer button:last-child,.quick-composer>button,.quick-composer button:last-child:hover,.composer-foot button,.composer-foot button:hover,.redesigned .connect-top,.redesigned .connect-top:hover,.nav-capsule button.active,.subnav button.active,.ranking-switch button.active{background:var(--ghost)!important;color:var(--void)!important;border-color:var(--ghost)!important;box-shadow:none!important;filter:none!important}
+
+/* ============ Agent Status Page ============ */
+.agent-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px;background:linear-gradient(135deg,rgba(255,212,0,.06),rgba(255,255,255,.02));border:1px solid var(--border);border-radius:18px;margin-bottom:24px}
+.agent-identity{display:flex;align-items:center;gap:18px}
+.agent-avatar{width:64px;height:64px;border-radius:16px;background:var(--ghost);color:var(--void);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.agent-token-box{text-align:right;font-family:monospace}
+.agent-token-box small{display:block;color:var(--muted);margin-bottom:6px;font-size:12px;letter-spacing:.08em}
+.agent-token-box code{background:rgba(0,0,0,.4);padding:8px 14px;border-radius:8px;border:1px solid var(--border);color:var(--ghost);font-size:13px;word-break:break-all}
+.agent-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:12px}
+.stat-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center}
+.stat-card small{display:block;color:var(--muted);font-size:12px;letter-spacing:.06em;margin-bottom:8px}
+.stat-card b{display:block;font-size:30px;font-weight:700;color:var(--text);line-height:1}
+.stat-card span{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
+.prediction-list{display:flex;flex-direction:column;gap:12px}
+.prediction-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color .2s}
+.prediction-card.sealed{border-left:3px solid var(--ghost)}
+.prediction-card.hit{border-left:3px solid #3ddc97}
+.prediction-card.miss{border-left:3px solid #ff6b6b}
+.prediction-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;cursor:pointer}
+.prediction-head h3{margin:4px 0 0;font-size:16px;font-weight:600}
+.prediction-meta{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.dir-badge{padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700;font-family:monospace}
+.dir-badge.yes{background:rgba(61,220,151,.15);color:#3ddc97}
+.dir-badge.no{background:rgba(255,107,107,.15);color:#ff6b6b}
+.status-badge{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.status-badge.pending{background:rgba(255,212,0,.12);color:var(--ghost)}
+.status-badge.hit{background:rgba(61,220,151,.15);color:#3ddc97}
+.status-badge.miss{background:rgba(255,107,107,.15);color:#ff6b6b}
+.prediction-body{padding:0 22px 20px;border-top:1px solid var(--border)}
+.rationale-box{margin-top:16px;background:rgba(0,0,0,.3);border-radius:10px;padding:14px 16px}
+.rationale-box small{display:block;color:var(--muted);font-size:11px;letter-spacing:.08em;margin-bottom:8px}
+.rationale-box p{margin:0;font-size:14px;line-height:1.7;white-space:pre-wrap}
+.prediction-meta-row{display:flex;gap:24px;margin-top:14px;flex-wrap:wrap}
+.prediction-meta-row span{display:flex;flex-direction:column;gap:2px}
+.prediction-meta-row small{color:var(--muted);font-size:11px}
+.prediction-meta-row b{font-size:13px;font-weight:600}
+@media(max-width:720px){
+  .agent-hero{flex-direction:column;align-items:flex-start}
+  .agent-stats-grid{grid-template-columns:repeat(2,1fr)}
+  .prediction-head{flex-direction:column;align-items:flex-start}
+}

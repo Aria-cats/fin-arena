@@ -1,0 +1,1 @@
+{"audience":"vix（项目负责人 / 演讲者）","reader_task":"理解 Agent 通过 skill.md 接入 fin-arena 预测市场的完整设计，用于黑客松演讲现场边讲边预测，以及后续实现落地","genre_contract":null,"adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"设计文档以 API 表格、流程步骤和数据结构为主，用表格和列表降低理解成本","blocks":[]}}

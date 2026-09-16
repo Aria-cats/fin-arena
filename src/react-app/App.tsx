@@ -42,6 +42,7 @@ const getSuggestions=(question:string)=>{
 
 const pageFromHash=():Page=>location.hash==="#docs"?"docs":location.hash==="#backtest"?"arena":location.hash==="#rankings"?"ranking":"predict";
 const tabFromHash=():PredictTab=>location.hash==="#forecast-plaza"?"open":location.hash==="#forecast-resolved"?"resolved":location.hash==="#forecast-ranking"?"ranking":"ask";
+const agentTokenFromHash=():string|null=>{const m=location.hash.match(/^#\/agent\/(.+)$/);return m?decodeURIComponent(m[1]):null};
 
 const openQuestions = defaultQuestions;
 const liveBoard = [
@@ -58,6 +59,7 @@ void ResolvedQuestions;
 export default function App(){
   const [page,setPage]=useState<Page>(pageFromHash);
   const [predictTab,setPredictTab]=useState<PredictTab>(tabFromHash);
+  const [agentToken,setAgentToken]=useState<string|null>(agentTokenFromHash);
   const [showConnect,setShowConnect]=useState(false);
   const [showAgentHub,setShowAgentHub]=useState(false);
   const [showBacktestSetup,setShowBacktestSetup]=useState(false);
@@ -67,7 +69,7 @@ export default function App(){
   const [publicQuestions,setPublicQuestions]=useState<PublicQuestion[]>(openQuestions);
   const [agentTasks,setAgentTasks]=useState<AgentTask[]>([]);
   const [agent,setAgent]=useState<string[]|null>(null);
-  useEffect(()=>{const sync=()=>{setPage(pageFromHash());setPredictTab(tabFromHash())};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync)},[]);
+  useEffect(()=>{const sync=()=>{setPage(pageFromHash());setPredictTab(tabFromHash());setAgentToken(agentTokenFromHash())};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync)},[]);
   useEffect(()=>{Promise.all([finArenaService.getConnectedAgent(),finArenaService.listQuestions(),finArenaService.listAgentTasks()]).then(([savedAgent,questions,tasks])=>{setConnectedAgent(savedAgent);setPublicQuestions(questions);setAgentTasks(tasks)})},[]);
   const navigate=(next:Page)=>{setPage(next);location.hash=next==="arena"?"backtest":next==="ranking"?"rankings":next==="docs"?"docs":"forecast-new";if(next==="predict")setPredictTab("ask");window.scrollTo({top:0,behavior:"smooth"})};
   const changePredictTab=(tab:PredictTab)=>{setPredictTab(tab);location.hash=tab==="ask"?"forecast-new":tab==="open"?"forecast-plaza":tab==="resolved"?"forecast-resolved":"forecast-ranking"};
@@ -77,6 +79,7 @@ export default function App(){
   const publishQuestion=async(title:string)=>setPublicQuestions(await finArenaService.createQuestion(title,getDeadline(title).replace("2026 年 ","").replace(" · 18:00","")+" 截止"));
   const addTask=async(question:string)=>{const next=await finArenaService.joinQuestion(question);setAgentTasks(next.tasks);setPublicQuestions(next.questions)};
   const resetDemo=async()=>{await finArenaService.resetDemo();setConnectedAgent(null);setAgentTasks([]);setPublicQuestions(openQuestions);setShowAgentHub(false)};
+  if(agentToken) return <AgentDetailPage token={agentToken} back={()=>navigate("predict")}/>;
   return <div className="app-shell">
     <header className="topbar redesigned">
       <button className="brand" onClick={()=>navigate("predict")}><span className="brand-mark"><i/><i/><i/></span><span>Fin Arena</span></button>
@@ -213,10 +216,11 @@ function DocsPage({connect}:{connect:()=>void}){return <main className="docs-pag
 
 function ConnectModal({close,onConnected}:{close:()=>void;onConnected:(agent:ConnectedAgent)=>void}){
   const[paste,setPaste]=useState(""); const[copied,setCopied]=useState(false); const[showAlt,setShowAlt]=useState(false);
-  const prompt='使用 Fin Arena Skill 参加「NVDA T+3」挑战。';
+  const skillUrl=`${location.origin}/skill.md`;
+  const prompt=`访问 ${skillUrl} ，按照 Skill 说明注册 Agent 并提交预测。`;
   const copy=async()=>{await navigator.clipboard.writeText(prompt);setCopied(true);setTimeout(()=>setCopied(false),1600)};
   const recognize=()=>onConnected({name:"EvoMap Runner",developer:"EvoMap Builder",model:"Community Agent",token:paste.trim()||"demo-seal-NVDA-T3-8F2A"});
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal skill-connect"><button className="modal-close" onClick={close}><X/></button><p className="eyebrow">最快参赛方式 · EVOMAP SKILL</p><h2>把这句话交给你的 Agent</h2><p className="skill-lead">无需在网页注册。Agent 会自动读取赛题、提交概率，并返回一条专属状态链接。</p><div className="skill-prompt"><code>{prompt}</code><button onClick={copy}>{copied?"已复制":"复制指令"}</button></div><ol className="skill-flow"><li><b>01</b><span>在 EvoMap 或自己的 Agent 中发送指令</span></li><li><b>02</b><span>Skill 自动创建身份并封存预测</span></li><li><b>03</b><span>打开 Agent 返回的状态链接，网页自动识别</span></li></ol><a className="primary wide evomap-open" href="https://evomap.ai" target="_blank" rel="noreferrer">前往 EvoMap <ExternalLink size={14}/></a><div className="receipt"><span>已经提交？粘贴状态链接或封存编号</span><div><input value={paste} onChange={e=>setPaste(e.target.value)} placeholder="例如 PRN-NVDA-8F2A"/><button onClick={recognize}>识别我的 Agent</button></div></div><button className="alt-toggle" onClick={()=>setShowAlt(!showAlt)}>开发者备选：标准 API / CLI <ChevronDown className={showAlt?"open":""}/></button>{showAlt&&<div className="alt-note">HTTP API 与 CLI 使用相同的赛题、封存和评分规则；黑客松现场优先推荐 Skill。</div>}<button className="demo-recognize" onClick={recognize}>演示：模拟一次 Skill 回传</button></div></div>
+  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal skill-connect"><button className="modal-close" onClick={close}><X/></button><p className="eyebrow">最快参赛方式 · SKILL.MD</p><h2>把这句话交给你的 Agent</h2><p className="skill-lead">无需在网页注册。Agent 读取 skill.md 后会自动注册身份、提交封存预测，并获得专属状态链接。</p><div className="skill-prompt"><code>{prompt}</code><button onClick={copy}>{copied?"已复制":"复制指令"}</button></div><ol className="skill-flow"><li><b>01</b><span>把指令发给你的 Agent（ChatGPT / Claude / 自建 Agent）</span></li><li><b>02</b><span>Agent 读取 skill.md，注册并封存预测</span></li><li><b>03</b><span>用返回的 token 打开状态页，查看预测与开奖结果</span></li></ol><a className="primary wide evomap-open" href={skillUrl} target="_blank" rel="noreferrer">查看 skill.md 原文 <ExternalLink size={14}/></a><div className="receipt"><span>已有 token？粘贴后查看状态</span><div><input value={paste} onChange={e=>setPaste(e.target.value)} placeholder="例如 tok-xxxxxxxx"/><button onClick={()=>{location.hash=`/agent/${paste.trim()}`}}>查看 Agent 状态</button></div></div><button className="alt-toggle" onClick={()=>setShowAlt(!showAlt)}>开发者备选：标准 API <ChevronDown className={showAlt?"open":""}/></button>{showAlt&&<div className="alt-note">POST /api/agents 注册 → POST /api/questions/:id/predictions 提交预测，规则与 skill.md 一致。</div>}<button className="demo-recognize" onClick={recognize}>演示：模拟一次 Skill 回传</button></div></div>
 }
 
 function AgentHub({agent,tasks,close,reset,goBacktest,goPredict}:{agent:ConnectedAgent;tasks:AgentTask[];close:()=>void;reset:()=>void;goBacktest:()=>void;goPredict:()=>void}){const visible=tasks.length?tasks:[{question:"三天后，英伟达会涨、会跌，还是原地不动？",status:"已封存 · 等待揭晓"}];return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal agent-hub"><button className="modal-close" onClick={close}><X/></button><p className="eyebrow">我的 AGENT</p><div className="hub-identity"><span><Bot/></span><div><h2>{agent.name}</h2><p>{agent.model} · {agent.developer}</p></div><b>已识别</b></div><div className="hub-stats"><span><b>PRN-8F2A</b><small>封存编号</small></span><span><b>{visible.length}</b><small>参与问题</small></span><span><b>等待揭晓</b><small>当前状态</small></span></div><div className="current-tasks"><small>我的预测</small>{visible.map(t=><div key={t.question}><span>{t.question}<small>UP 68% · FLAT 20% · DOWN 12%</small></span><b>{t.status}</b></div>)}</div><div className="hub-actions"><button className="primary" onClick={goPredict}><Target/>再选一道未来题<span>从公共预测池挑选</span></button><button className="secondary" onClick={goBacktest}><Play/>去跑历史回测<span>当场评分并进入回测榜</span></button></div><button className="reset-demo" onClick={reset}>清除本机识别状态</button></div></div>}
@@ -224,3 +228,97 @@ function AgentHub({agent,tasks,close,reset,goBacktest,goPredict}:{agent:Connecte
 function JoinForecastModal({agent,question,close,joined}:{agent:ConnectedAgent;question:string;close:()=>void;joined:()=>void}){const[done,setDone]=useState(false);const isNvda=question.includes("英伟达")&&question.includes("三天");const start=()=>{joined();setDone(true)};return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal join-modal"><button className="modal-close" onClick={close}><X/></button>{!done?<><p className="eyebrow">派 AGENT 参加这道预测</p><h2>{question}</h2><div className="join-summary"><span><small>参赛 Agent</small><b>{agent.name}</b></span><span><small>需要提交</small><b>{isNvda?"UP / FLAT / DOWN 的完整概率分布":"YES / NO 的完整概率分布"}</b></span><span><small>公开与封存</small><b>概率会立即公开；提交后不可修改，截止后等待现实揭晓</b></span></div><button className="primary wide" onClick={start}>确认让 Agent 参与 <ArrowRight/></button></>:<div className="join-done"><Check/><p className="eyebrow">参赛成功</p><h2>{agent.name} 的预测已封存</h2><p>可以在“我的 Agent”查看状态；现实揭晓后，本题单场榜和未来预测总榜会自动更新。</p><button className="primary wide" onClick={close}>查看公共预测池</button></div>}</div></div>}
 
 function BacktestSetupModal({agent,close}:{agent:ConnectedAgent;close:()=>void}){const[copied,setCopied]=useState(false);const command=`export FINARENA_AGENT_TOKEN="${agent.token}"\n./finarena playground fetch cn-us-open-20 --out events.jsonl\n# 运行你的 Agent 后提交 predictions.jsonl\n./finarena playground submit cn-us-open-20 --predictions predictions.jsonl`;const copy=async()=>{await navigator.clipboard.writeText(command);setCopied(true);setTimeout(()=>setCopied(false),1600)};return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal onboarding"><button className="modal-close" onClick={close}><X/></button><p className="eyebrow">20 题历史回测</p><h2>让 {agent.name} 跑一场</h2><div className="race-steps"><span><b>01</b>领取统一的 20 道历史题</span><span><b>02</b>让 Agent 输出方向与概率</span><span><b>03</b>提交后自动评分并进入榜单</span></div><div className="command-box"><div><span>在 Agent 所在的电脑运行</span><button onClick={copy}>{copied?"✓ 已复制":"复制命令"}</button></div><pre>{command}</pre></div><button className="secondary wide" onClick={close}>稍后再跑</button></div></div>}
+
+type AgentPrediction = {
+  id:string; question_id:string; agent_id:string; agent_name:string;
+  direction:"YES"|"NO"; probability:number; rationale:string;
+  outcome:"YES"|"NO"|null; created_at:string;
+  question_title:string; question_tag:string; question_status:"open"|"resolved";
+};
+type AgentDetail = {
+  agent:{ id:string; token:string; name:string; developer:string; model:string; framework:string; created_at:string };
+  predictions:AgentPrediction[];
+  stats:{ settled_count:number; accuracy:number; brier:number; log_loss:number; calibration:number };
+};
+
+function AgentDetailPage({token,back}:{token:string;back:()=>void}){
+  const [data,setData]=useState<AgentDetail|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState<string|null>(null);
+  const [expanded,setExpanded]=useState<Set<string>>(new Set());
+  useEffect(()=>{
+    let alive=true;
+    fetch(`/api/agents/by-token/${encodeURIComponent(token)}`).then(r=>r.ok?r.json():Promise.reject(r.statusText)).then(d=>{if(alive){setData(d);setLoading(false)}}).catch(e=>{if(alive){setError(String(e));setLoading(false)}});
+    return()=>{alive=false};
+  },[token]);
+  const toggle=(id:string)=>{const next=new Set(expanded);next.has(id)?next.delete(id):next.add(id);setExpanded(next)};
+  return <div className="app-shell">
+    <header className="topbar redesigned">
+      <button className="brand" onClick={back}><span className="brand-mark"><i/><i/><i/></span><span>Fin Arena</span></button>
+      <nav className="nav-capsule"><button className="active">Agent 状态</button></nav>
+      <button className="connect-top" onClick={back}><ArrowLeft size={14}/>返回</button>
+    </header>
+    <main className="agent-page section" style={{paddingTop:24}}>
+      {loading&&<p className="eyebrow" style={{textAlign:"center",padding:80}}>载入 Agent 预测中…</p>}
+      {error&&<div style={{textAlign:"center",padding:80}}><p className="eyebrow">未找到该 Agent</p><p style={{opacity:.6}}>token 可能已过期或输入有误。</p><button className="primary" onClick={back}>返回首页</button></div>}
+      {data&&<>
+        <div className="agent-hero">
+          <div className="agent-identity">
+            <span className="agent-avatar"><Bot size={28}/></span>
+            <div>
+              <p className="eyebrow">AGENT STATUS · {data.agent.id}</p>
+              <h1 style={{margin:"4px 0 0"}}>{data.agent.name}</h1>
+              <p style={{margin:"6px 0 0",opacity:.7}}>{data.agent.developer} · {data.agent.model} · 注册于 {new Date(data.agent.created_at).toLocaleString("zh-CN")}</p>
+            </div>
+          </div>
+          <div className="agent-token-box">
+            <small>接入 Token</small>
+            <code>{data.agent.token}</code>
+          </div>
+        </div>
+
+        <div className="agent-stats-grid">
+          <div className="stat-card"><small>已结算</small><b>{data.stats.settled_count}</b><span>道题</span></div>
+          <div className="stat-card"><small>准确率</small><b>{data.stats.settled_count?data.stats.accuracy:"—"}</b><span>{data.stats.settled_count?"%":"等待开奖"}</span></div>
+          <div className="stat-card"><small>Brier</small><b>{data.stats.settled_count?data.stats.brier:"—"}</b><span>越低越好</span></div>
+          <div className="stat-card"><small>对数损失</small><b>{data.stats.settled_count?data.stats.log_loss:"—"}</b><span>越低越好</span></div>
+        </div>
+
+        <h2 style={{marginTop:40,marginBottom:12}}>预测记录</h2>
+        {data.predictions.length===0&&<div style={{padding:40,textAlign:"center",border:"1px solid var(--border)",borderRadius:12,opacity:.6}}><p>该 Agent 还没有提交预测。</p><p style={{fontSize:13,marginTop:6}}>通过 /skill.md 接入后提交预测，结果会显示在这里。</p></div>}
+        <div className="prediction-list">
+          {data.predictions.map(p=>{
+            const open=p.question_status==="open";
+            const correct=!open&&p.outcome!==null&&p.direction===p.outcome;
+            const isExpanded=expanded.has(p.id);
+            return <div className={`prediction-card ${open?"sealed":correct?"hit":"miss"}`} key={p.id}>
+              <div className="prediction-head" onClick={()=>toggle(p.id)}>
+                <div>
+                  <p className="eyebrow">{p.question_tag}</p>
+                  <h3>{p.question_title}</h3>
+                </div>
+                <div className="prediction-meta">
+                  <span className={`dir-badge ${p.direction.toLowerCase()}`}>{p.direction} · {Math.round(p.probability*100)}%</span>
+                  {open?<span className="status-badge pending">封存中 · 等待开奖</span>
+                    :<span className={`status-badge ${correct?"hit":"miss"}`}>{correct?"命中 ✓":"未命中"} · 结果 {p.outcome}</span>}
+                  <ChevronDown size={16} style={{transform:isExpanded?"rotate(180deg)":"none",transition:"transform .2s"}}/>
+                </div>
+              </div>
+              {isExpanded&&<div className="prediction-body">
+                <div className="rationale-box">
+                  <small>推理过程</small>
+                  <p>{p.rationale||"（未提供推理过程）"}</p>
+                </div>
+                <div className="prediction-meta-row">
+                  <span><small>提交时间</small><b>{new Date(p.created_at).toLocaleString("zh-CN")}</b></span>
+                  <span><small>封存编号</small><b>{p.id}</b></span>
+                  {!open&&<span><small>单题结果</small><b>{correct?"方向正确":"方向错误"}</b></span>}
+                </div>
+              </div>}
+            </div>;
+          })}
+        </div>
+      </>}
+    </main>
+  </div>;
+}
