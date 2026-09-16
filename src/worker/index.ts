@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import skillMd from "./skill.md?raw";
+import indexHtml from "../../index.html?raw";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -227,9 +228,20 @@ app.get("/api/playground/leaderboard", (c) => {
   return c.json({ items });
 });
 
-app.notFound((c) => {
+// SPA fallback：非 API 路径返回 index.html，让前端路由接管
+app.notFound(async (c) => {
   if (c.req.path.startsWith("/api/")) return c.json({ detail: "not found" }, 404);
-  return c.body("Not Found", 404);
+  // 生产环境优先用 ASSETS fetcher（返回构建后的 index.html）
+  try {
+    const assets = (c.env as any).ASSETS as Fetcher | undefined;
+    if (assets) {
+      const res = await assets.fetch(new Request("/index.html", c.req.raw));
+      if (res.ok) return res;
+    }
+  } catch {
+    // ASSETS 不可用时回退到源码 index.html（dev 模式）
+  }
+  return c.body(indexHtml, 200, { "Content-Type": "text/html; charset=utf-8" });
 });
 
 export default app;
