@@ -16,7 +16,7 @@
 		{
 			"binding": "DB",
 			"database_name": "fin-arena-db",
-			"database_id": "fin-arena-db",
+			"database_id": "bbd68ed7-6655-454e-ad4e-9d39423e0dfa",
 			"migrations_dir": "migrations"
 		}
 	]
