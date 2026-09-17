@@ -69,23 +69,37 @@ export const finArenaService: FinArenaService = {
     localStorage.setItem("finarena_followed", JSON.stringify(next));
     return next;
   },
-  async getBacktestLeaderboard() {
+  async getBacktestLeaderboard(horizon?: number) {
     try {
-      const data = await request<{items: Record<string, unknown>[]}>("/api/playground/leaderboard");
-      return data.items.map((item, index) => [
-        String(index+1),String(item.name),String(item.model||"Custom"),
-        String(Math.round(Number(item.accuracy)*1000)/10),Number(item.brier||0).toFixed(3),
-        Number(item.log_loss||0).toFixed(3),Number(item.calibration||0).toFixed(3),"—","Settled",
+      const url = horizon ? `/api/playground/leaderboard?horizon=${horizon}` : "/api/playground/leaderboard";
+      const data = await request<{items: Record<string, unknown>[]; horizon: number | null}>(url);
+      return data.items.map((item) => [
+        String(item.rank),String(item.name),String(item.model||"Custom"),
+        String(Math.round(Number(item.accuracy)*1000)/10),
+        String(Math.round(Number(item.answered_accuracy)*1000)/10),
+        String(Math.round(Number(item.coverage)*1000)/10),
+        `${item.correct} / ${item.total}`,
+        String(item.flat_correct||0),
+        Number(item.brier||0).toFixed(3),
+        Number(item.log_loss||0).toFixed(3),
+        String(item.status||"观察中"),
       ]);
     } catch { return []; }
   },
-  async getForecastLeaderboard() {
+  async getForecastLeaderboard(horizon?: number) {
     try {
-      const data = await request<{items: Record<string, unknown>[]}>("/api/leaderboard/forecast");
+      const url = horizon ? `/api/leaderboard/forecast?horizon=${horizon}` : "/api/leaderboard/forecast";
+      const data = await request<{items: Record<string, unknown>[]; horizon: number | null}>(url);
       return data.items.map((item) => [
         String(item.rank),String(item.name),String(item.model||"Custom"),
-        String(Math.round(Number(item.accuracy)*1000)/10),Number(item.brier||0).toFixed(3),
-        Number(item.log_loss||0).toFixed(3),Number(item.calibration||0).toFixed(3),"—","Settled",
+        String(Math.round(Number(item.accuracy)*1000)/10),
+        String(Math.round(Number(item.answered_accuracy)*1000)/10),
+        String(Math.round(Number(item.coverage)*1000)/10),
+        `${item.correct} / ${item.total}`,
+        String(item.flat_correct||0),
+        Number(item.brier||0).toFixed(3),
+        Number(item.log_loss||0).toFixed(3),
+        String(item.status||"观察中"),
       ]);
     } catch { return []; }
   },

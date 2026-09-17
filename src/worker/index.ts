@@ -179,48 +179,76 @@ app.post("/api/questions/:id/settle", async (c) => {
 // ---------------------------------------------------------------------------
 // 排行榜
 // ---------------------------------------------------------------------------
-async function computeLeaderboard(db: D1Database) {
-  const { results } = await db.prepare(
-    "SELECT agent_id, agent_name, direction, probability, outcome FROM predictions WHERE outcome IS NOT NULL"
-  ).all<{ agent_id: string; agent_name: string; direction: string; probability: number; outcome: string }>();
+async function computeLeaderboard(db: D1Database, horizon?: number) {
+  const horizonFilter = horizon ? "AND horizon = ?" : "";
+  const stmt = horizon
+    ? db.prepare(`SELECT agent_id, agent_name, direction, probability, outcome, status FROM predictions WHERE outcome IS NOT NULL ${horizonFilter}`).bind(horizon)
+    : db.prepare(`SELECT agent_id, agent_name, direction, probability, outcome, status FROM predictions WHERE outcome IS NOT NULL`);
+  const { results } = await stmt.all<{ agent_id: string; agent_name: string; direction: string; probability: number; outcome: string; status: string }>();
 
   const { results: agents } = await db.prepare(
     "SELECT id, model FROM agents"
   ).all<{ id: string; model: string }>();
   const agentModelMap = new Map(agents.map((a) => [a.id, a.model]));
 
-  const agentScores = new Map<string, { name: string; correct: number; total: number; brierSum: number; lossSum: number }>();
+  // 计算各 Agent 成绩：total=总题数, answered=有效答卷, correct=正确, flat_correct=平盘正确
+  const agentScores = new Map<string, { name: string; correct: number; total: number; answered: number; flatCorrect: number; brierSum: number; lossSum: number }>();
   for (const p of results) {
-    const s = agentScores.get(p.agent_id) || { name: p.agent_name, correct: 0, total: 0, brierSum: 0, lossSum: 0 };
+    const s = agentScores.get(p.agent_id) || { name: p.agent_name, correct: 0, total: 0, answered: 0, flatCorrect: 0, brierSum: 0, lossSum: 0 };
     s.total++;
+    const isValid = p.status === "valid";
+    if (isValid) s.answered++;
     const actual = p.outcome === "YES" ? 1 : 0;
     const prob = p.direction === "YES" ? p.probability : 1 - p.probability;
-    if (p.direction === p.outcome) s.correct++;
-    s.brierSum += (prob - actual) ** 2;
-    const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
-    s.lossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
+    if (isValid && p.direction === p.outcome) s.correct++;
+    if (isValid) {
+      s.brierSum += (prob - actual) ** 2;
+      const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
+      s.lossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
+    }
     agentScores.set(p.agent_id, s);
   }
-  let items = Array.from(agentScores.entries()).map(([id, s]) => ({
-    id, name: s.name, model: agentModelMap.get(id) || "Custom",
-    accuracy: s.total ? s.correct / s.total : 0,
-    brier: s.total ? s.brierSum / s.total : 0,
-    log_loss: s.total ? s.lossSum / s.total : 0,
-    calibration: 0, settled_count: s.total,
-  }));
-  items.sort((a, b) => b.accuracy - a.accuracy || a.brier - b.brier);
+
+  // 排序：按有效准确率降序，再按覆盖率降序
+  let items = Array.from(agentScores.entries()).map(([id, s]) => {
+    const total = s.total;
+    const answered = s.answered;
+    const accuracy = total ? s.correct / total : 0;
+    const answeredAccuracy = answered ? s.correct / answered : 0;
+    const coverage = total ? answered / total : 0;
+    const status = total >= 20 && coverage >= 0.95 ? "正式" : "观察中";
+    return {
+      id, name: s.name, model: agentModelMap.get(id) || "Custom",
+      accuracy, answered_accuracy: answeredAccuracy, coverage,
+      correct: s.correct, total, answered, flat_correct: s.flatCorrect,
+      brier: answered ? s.brierSum / answered : 0,
+      log_loss: answered ? s.lossSum / answered : 0,
+      calibration: 0, settled_count: total, status,
+    };
+  });
+  items.sort((a, b) => b.accuracy - a.accuracy || b.coverage - a.coverage || a.brier - b.brier);
   items = items.map((it, i) => ({ ...it, rank: i + 1 }));
-  return items;
+
+  return {
+    items,
+    horizon: horizon || null,
+    cohort: {
+      description: "同一期限内已结算预测比较；缺答不计入答卷准确率，但计入有效准确率分母。",
+      common_tasks: results.length,
+    },
+  };
 }
 
 app.get("/api/leaderboard/forecast", async (c) => {
-  const items = await computeLeaderboard(c.env.DB);
-  return c.json({ items });
+  const horizon = c.req.query("horizon") ? Number(c.req.query("horizon")) : undefined;
+  const board = await computeLeaderboard(c.env.DB, horizon);
+  return c.json(board);
 });
 
 app.get("/api/playground/leaderboard", async (c) => {
-  const items = await computeLeaderboard(c.env.DB);
-  return c.json({ items });
+  const horizon = c.req.query("horizon") ? Number(c.req.query("horizon")) : undefined;
+  const board = await computeLeaderboard(c.env.DB, horizon);
+  return c.json(board);
 });
 
 // SPA fallback：非 API 路径返回 index.html，让前端路由接管

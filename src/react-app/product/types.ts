@@ -29,8 +29,8 @@ export interface FinArenaService {
   joinQuestion(question: string): Promise<{ tasks: AgentTask[]; questions: PublicQuestion[] }>;
   listFollowedQuestions(): Promise<string[]>;
   toggleFollow(questionId: string): Promise<string[]>;
-  getBacktestLeaderboard(): Promise<LeaderboardRow[]>;
-  getForecastLeaderboard(): Promise<LeaderboardRow[]>;
+  getBacktestLeaderboard(horizon?: number): Promise<LeaderboardRow[]>;
+  getForecastLeaderboard(horizon?: number): Promise<LeaderboardRow[]>;
   registerAgent(input: AgentRegistrationInput): Promise<{ token: string }>;
   resetDemo(): Promise<void>;
 }
