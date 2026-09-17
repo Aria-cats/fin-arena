@@ -227,11 +227,14 @@ async function computeLeaderboard(db: D1Database, horizon?: number) {
   ).all<{ id: string; model: string }>();
   const agentModelMap = new Map(agents.map((a) => [a.id, a.model]));
 
-  // 收集每个 agent 的预测用于校准
+  // 按 agent_name 聚合，同名 Agent 自动合并（防御重复注册）
+  const nameToId = new Map<string, string>();
   const agentPreds = new Map<string, { direction: string; probability: number; outcome: string }[]>();
   const agentScores = new Map<string, { name: string; correct: number; total: number; answered: number; flatCorrect: number; brierSum: number; lossSum: number }>();
   for (const p of results) {
-    const s = agentScores.get(p.agent_id) || { name: p.agent_name, correct: 0, total: 0, answered: 0, flatCorrect: 0, brierSum: 0, lossSum: 0 };
+    if (!nameToId.has(p.agent_name)) nameToId.set(p.agent_name, p.agent_id);
+    const key = p.agent_name;
+    const s = agentScores.get(key) || { name: p.agent_name, correct: 0, total: 0, answered: 0, flatCorrect: 0, brierSum: 0, lossSum: 0 };
     s.total++;
     const isValid = p.status === "valid";
     if (isValid) s.answered++;
@@ -242,21 +245,22 @@ async function computeLeaderboard(db: D1Database, horizon?: number) {
       s.brierSum += (prob - actual) ** 2;
       const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
       s.lossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
-      if (!agentPreds.has(p.agent_id)) agentPreds.set(p.agent_id, []);
-      agentPreds.get(p.agent_id)!.push({ direction: p.direction, probability: p.probability, outcome: p.outcome });
+      if (!agentPreds.has(key)) agentPreds.set(key, []);
+      agentPreds.get(key)!.push({ direction: p.direction, probability: p.probability, outcome: p.outcome });
     }
-    agentScores.set(p.agent_id, s);
+    agentScores.set(key, s);
   }
 
   // 排序：按有效准确率降序，再按覆盖率降序
-  let items = Array.from(agentScores.entries()).map(([id, s]) => {
+  let items = Array.from(agentScores.entries()).map(([name, s]) => {
+    const id = nameToId.get(name) || name;
     const total = s.total;
     const answered = s.answered;
     const accuracy = total ? s.correct / total : 0;
     const answeredAccuracy = answered ? s.correct / answered : 0;
     const coverage = total ? answered / total : 0;
     const status = total >= 20 && coverage >= 0.95 ? "正式" : "观察中";
-    const cal = computeCalibration(agentPreds.get(id) || []);
+    const cal = computeCalibration(agentPreds.get(name) || []);
     return {
       id, name: s.name, model: agentModelMap.get(id) || "Custom",
       accuracy, answered_accuracy: answeredAccuracy, coverage,
