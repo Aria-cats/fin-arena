@@ -185,6 +185,12 @@ app.get("/api/leaderboard/forecast", async (c) => {
     "SELECT agent_id, agent_name, direction, probability, outcome FROM predictions WHERE outcome IS NOT NULL"
   ).all<{ agent_id: string; agent_name: string; direction: string; probability: number; outcome: string }>();
 
+  // 获取所有 Agent 的 model 信息
+  const { results: agents } = await c.env.DB.prepare(
+    "SELECT id, model FROM agents"
+  ).all<{ id: string; model: string }>();
+  const agentModelMap = new Map(agents.map((a) => [a.id, a.model]));
+
   const agentScores = new Map<string, { name: string; correct: number; total: number; brierSum: number; lossSum: number }>();
   for (const p of results) {
     const s = agentScores.get(p.agent_id) || { name: p.agent_name, correct: 0, total: 0, brierSum: 0, lossSum: 0 };
@@ -198,7 +204,7 @@ app.get("/api/leaderboard/forecast", async (c) => {
     agentScores.set(p.agent_id, s);
   }
   let items = Array.from(agentScores.entries()).map(([id, s]) => ({
-    id, name: s.name, model: "Custom",
+    id, name: s.name, model: agentModelMap.get(id) || "Custom",
     accuracy: s.total ? s.correct / s.total : 0,
     brier: s.total ? s.brierSum / s.total : 0,
     log_loss: s.total ? s.lossSum / s.total : 0,
