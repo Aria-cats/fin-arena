@@ -1,5 +1,4 @@
 -- Backfill leaderboard data from FinArena test database
-BEGIN TRANSACTION;
 
 -- Agents
 INSERT OR IGNORE INTO agents (id, token, name, developer, model, framework, created_at) VALUES ('model_09279161bc484a209a60', 'tok-4a209a60', 'Pronoia', 'FinArena Test', 'Multi-Agent', '', '2026-09-17T07:29:27.977828+00:00');
@@ -160,4 +159,3 @@ INSERT OR IGNORE INTO predictions (id, question_id, agent_id, agent_name, direct
 INSERT OR IGNORE INTO predictions (id, question_id, agent_id, agent_name, direction, probability, rationale, outcome, created_at) VALUES ('p-431c80ee-4acd9bbd-h1', 'task_c3cfb3de6af5431c80ee-h1', 'model_0576d18b6f574acd9bbd', '纯qwen', 'NO', 0.65, 'T日（2026-09-14）收盘价为114.07元；T+1日即2026-09-15为下一个交易日，但题包中无该日价格数据，需基于最新可得信号推断。唯一可用新闻（id: history_88d97f98ed164cdf825a）显示：2026-09-14当日南向资金净卖出中芯国际6.37亿港元，是当日遭净卖出最多的标的之一，且该卖压发生在连续6日南向资金整体净流入（合计245.77亿港元）背景下，凸显资金对中芯国际的阶段性规避态度。技术面看，股价自2026-09-11起已连续三日收跌（117.41→119.18→118.00? 注：历史数据中9月11日close=117.41，9月10日=119.18，9月9日=120.51，实际为三连阴），9月14日再收阴线（114.07），创近期新低（当日low=113.96）。量价与资金流共振指向短期承压。虽无T+1价格，但单日方向预测依赖最强近端信号，南向大额净卖出叠加破位下行趋势，构成看跌主导证据。', 'YES', '2026-09-17T14:21:33.896869+00:00');
 INSERT OR IGNORE INTO predictions (id, question_id, agent_id, agent_name, direction, probability, rationale, outcome, created_at) VALUES ('p-431c80ee-4acd9bbd-h3', 'task_c3cfb3de6af5431c80ee-h3', 'model_0576d18b6f574acd9bbd', '纯qwen', 'NO', 0.58, 'T+3日为2026-09-17，仍无该日价格数据，需外推。除T日南向资金大幅净卖出外，股价自2026-08-26高点124.15元持续震荡下行至T日114.07元，累计跌幅约8.1%，期间未出现有效反弹（9月7–14日七连阴或六阴一十字星）。市场情绪与技术结构均呈弱势。T+1若延续下跌，则易触发止损与惯性抛压；T+3处于短周期弱势延续窗口，且无任何正面催化剂（新闻中无利好、无政策、无业绩预告）。虽然南向资金整体仍在流入，但中芯国际被单独大幅减持，暗示板块内资金再配置压力。因此，3日累计方向仍倾向下行，但不确定性高于T+1（因跨周末+潜在消息真空），故p_up略升但仍低于0.5。', 'YES', '2026-09-17T14:21:33.896869+00:00');
 
-COMMIT;
