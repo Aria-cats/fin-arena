@@ -47,10 +47,11 @@ app.post("/api/playground/agents", async (c) => {
 // ---------------------------------------------------------------------------
 async function agentStats(db: D1Database, agentId: string) {
   const { results } = await db.prepare(
-    "SELECT direction, probability, outcome FROM predictions WHERE agent_id = ? AND outcome IS NOT NULL"
-  ).bind(agentId).all<{ direction: string; probability: number; outcome: string }>();
-  if (results.length === 0) return { settled_count: 0, accuracy: 0, brier: 0, log_loss: 0, calibration: 0 };
+    "SELECT direction, probability, outcome, horizon FROM predictions WHERE agent_id = ? AND outcome IS NOT NULL AND status = 'valid'"
+  ).bind(agentId).all<{ direction: string; probability: number; outcome: string; horizon: number }>();
+  if (results.length === 0) return { settled_count: 0, accuracy: 0, brier: 0, log_loss: 0, calibration: 0, calibration_buckets: [], by_horizon: {} };
   let correct = 0, brierSum = 0, logLossSum = 0;
+  const byHorizon = new Map<number, { correct: number; total: number; brier: number }>();
   for (const p of results) {
     const actual = p.outcome === "YES" ? 1 : 0;
     const prob = p.direction === "YES" ? p.probability : 1 - p.probability;
@@ -58,13 +59,25 @@ async function agentStats(db: D1Database, agentId: string) {
     brierSum += (prob - actual) ** 2;
     const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
     logLossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
+    const h = byHorizon.get(p.horizon) || { correct: 0, total: 0, brier: 0 };
+    h.total++;
+    if (p.direction === p.outcome) h.correct++;
+    h.brier += (prob - actual) ** 2;
+    byHorizon.set(p.horizon, h);
+  }
+  const cal = computeCalibration(results);
+  const byHorizonOut: Record<string, { correct: number; total: number; accuracy: number; brier: number }> = {};
+  for (const [h, v] of byHorizon) {
+    byHorizonOut[`T+${h}`] = { correct: v.correct, total: v.total, accuracy: Math.round((v.correct / v.total) * 1000) / 10, brier: Math.round((v.brier / v.total) * 1000) / 1000 };
   }
   return {
     settled_count: results.length,
     accuracy: Math.round((correct / results.length) * 1000) / 10,
     brier: Math.round((brierSum / results.length) * 1000) / 1000,
     log_loss: Math.round((logLossSum / results.length) * 1000) / 1000,
-    calibration: 0,
+    calibration: cal.ece,
+    calibration_buckets: cal.buckets,
+    by_horizon: byHorizonOut,
   };
 }
 
@@ -177,6 +190,29 @@ app.post("/api/questions/:id/settle", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// 校准计算：检验预测概率与真实发生率的吻合程度（ECE + 分桶）
+// ---------------------------------------------------------------------------
+function computeCalibration(predictions: { direction: string; probability: number; outcome: string }[]) {
+  const bins = new Array(10).fill(0).map(() => ({ count: 0, sumProb: 0, correct: 0 }));
+  for (const p of predictions) {
+    const actual = p.outcome === "YES" ? 1 : 0;
+    const prob = p.direction === "YES" ? p.probability : 1 - p.probability;
+    const binIdx = Math.min(9, Math.max(0, Math.floor(prob * 10)));
+    bins[binIdx].count++;
+    bins[binIdx].sumProb += prob;
+    if (actual) bins[binIdx].correct++;
+  }
+  let ece = 0, total = 0;
+  const buckets = bins.map((b, i) => {
+    const avgProb = b.count ? b.sumProb / b.count : 0;
+    const actualRate = b.count ? b.correct / b.count : 0;
+    if (b.count) { ece += Math.abs(actualRate - avgProb) * b.count; total += b.count; }
+    return { range: `${i * 10}-${(i + 1) * 10}%`, count: b.count, predicted: Math.round(avgProb * 1000) / 1000, actual: Math.round(actualRate * 1000) / 1000 };
+  });
+  return { ece: total ? Math.round((ece / total) * 1000) / 1000 : 0, buckets };
+}
+
+// ---------------------------------------------------------------------------
 // 排行榜
 // ---------------------------------------------------------------------------
 async function computeLeaderboard(db: D1Database, horizon?: number) {
@@ -191,7 +227,8 @@ async function computeLeaderboard(db: D1Database, horizon?: number) {
   ).all<{ id: string; model: string }>();
   const agentModelMap = new Map(agents.map((a) => [a.id, a.model]));
 
-  // 计算各 Agent 成绩：total=总题数, answered=有效答卷, correct=正确, flat_correct=平盘正确
+  // 收集每个 agent 的预测用于校准
+  const agentPreds = new Map<string, { direction: string; probability: number; outcome: string }[]>();
   const agentScores = new Map<string, { name: string; correct: number; total: number; answered: number; flatCorrect: number; brierSum: number; lossSum: number }>();
   for (const p of results) {
     const s = agentScores.get(p.agent_id) || { name: p.agent_name, correct: 0, total: 0, answered: 0, flatCorrect: 0, brierSum: 0, lossSum: 0 };
@@ -205,6 +242,8 @@ async function computeLeaderboard(db: D1Database, horizon?: number) {
       s.brierSum += (prob - actual) ** 2;
       const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
       s.lossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
+      if (!agentPreds.has(p.agent_id)) agentPreds.set(p.agent_id, []);
+      agentPreds.get(p.agent_id)!.push({ direction: p.direction, probability: p.probability, outcome: p.outcome });
     }
     agentScores.set(p.agent_id, s);
   }
@@ -217,13 +256,14 @@ async function computeLeaderboard(db: D1Database, horizon?: number) {
     const answeredAccuracy = answered ? s.correct / answered : 0;
     const coverage = total ? answered / total : 0;
     const status = total >= 20 && coverage >= 0.95 ? "正式" : "观察中";
+    const cal = computeCalibration(agentPreds.get(id) || []);
     return {
       id, name: s.name, model: agentModelMap.get(id) || "Custom",
       accuracy, answered_accuracy: answeredAccuracy, coverage,
       correct: s.correct, total, answered, flat_correct: s.flatCorrect,
       brier: answered ? s.brierSum / answered : 0,
       log_loss: answered ? s.lossSum / answered : 0,
-      calibration: 0, settled_count: total, status,
+      calibration: cal.ece, calibration_buckets: cal.buckets, settled_count: total, status,
     };
   });
   items.sort((a, b) => b.accuracy - a.accuracy || b.coverage - a.coverage || a.brier - b.brier);

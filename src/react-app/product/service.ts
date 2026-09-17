@@ -82,6 +82,7 @@ export const finArenaService: FinArenaService = {
         String(item.flat_correct||0),
         Number(item.brier||0).toFixed(3),
         Number(item.log_loss||0).toFixed(3),
+        Number(item.calibration||0).toFixed(3),
         String(item.status||"观察中"),
       ]);
     } catch { return []; }
@@ -99,6 +100,7 @@ export const finArenaService: FinArenaService = {
         String(item.flat_correct||0),
         Number(item.brier||0).toFixed(3),
         Number(item.log_loss||0).toFixed(3),
+        Number(item.calibration||0).toFixed(3),
         String(item.status||"观察中"),
       ]);
     } catch { return []; }

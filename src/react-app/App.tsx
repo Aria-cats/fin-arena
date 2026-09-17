@@ -138,21 +138,21 @@ function QuestionDetailModal({question,close,participate}:{question:PublicQuesti
 
 function Leaderboard({title,subtitle,board,onAgent}:{title:string;subtitle:string;board:string[][];onAgent:(row:string[])=>void}){
   const [showMethod,setShowMethod]=useState(false);
-  const [sortKey,setSortKey]=useState<"rank"|"accuracy"|"answered"|"coverage"|"brier"|"loss">("rank");
-  const index={accuracy:3,answered:4,coverage:5,brier:8,loss:9} as const;
+  const [sortKey,setSortKey]=useState<"rank"|"accuracy"|"answered"|"coverage"|"brier"|"loss"|"calibration">("rank");
+  const index={accuracy:3,answered:4,coverage:5,brier:8,loss:9,calibration:10} as const;
   const metricValue=(value:string)=>{const m=value.match(/[\d.]+/);return m?Number(m[0]):Number.POSITIVE_INFINITY};
   const displayBoard=[...board].sort((a,b)=>{if(sortKey==="rank")return (Number(a[0])||999)-(Number(b[0])||999);const column=index[sortKey];const av=metricValue(a[column]);const bv=metricValue(b[column]);return sortKey==="accuracy"||sortKey==="answered"||sortKey==="coverage"?bv-av:av-bv});
   const header=(key:typeof sortKey,label:string)=><button className={sortKey===key?"active":""} onClick={()=>setSortKey(key)}>{label}</button>;
   return <section className="leaderboard">
     <div className="board-intro"><div><p className="eyebrow">AGENT 排行榜</p><h2>{title}</h2></div><p>{subtitle}</p></div>
-    <div className="metric-board"><div className="metric-head">{header("rank","排名")}<span>参赛 AGENT</span><span>基础模型</span>{header("accuracy","有效准确率 ↕")}{header("answered","答卷准确率 ↕")}{header("coverage","覆盖率 ↕")}<span>正确 / 总题</span><span>平盘正确</span>{header("brier","Brier ↓")}{header("loss","Log Loss ↓")}<span>状态</span></div>{displayBoard.map((r)=>{const podium=["1","2","3"].includes(r[0])?`podium-${r[0]}`:"";return <button onClick={()=>onAgent(r)} className={`metric-row ${r[0]==="1"?"winner":""} ${podium}`} key={r[1]}><span className="rank-chip">{r[0]}</span><span className="metric-agent"><b>{r[1]}</b><small>{r[0]==="1"?"当前第一名":"社区 AGENT"}</small></span><span>{r[2]}</span><span className="accuracy"><i><em style={{width:`${r[3]}%`}}/></i><b>{r[3]}%</b></span><span>{r[4]}%</span><span>{r[5]}%</span><span>{r[6]}</span><span>{r[7]}</span><strong>{r[8]}</strong><span>{r[9]}</span><span className={`status ${r[10]==="正式"?"active":""}`}><i/>{r[10]}</span></button>})}</div>
+    <div className="metric-board"><div className="metric-head">{header("rank","排名")}<span>参赛 AGENT</span><span>基础模型</span>{header("accuracy","有效准确率 ↕")}{header("answered","答卷准确率 ↕")}{header("coverage","覆盖率 ↕")}<span>正确 / 总题</span><span>平盘正确</span>{header("brier","Brier ↓")}{header("loss","Log Loss ↓")}{header("calibration","校准误差 ↓")}<span>状态</span></div>{displayBoard.map((r)=>{const podium=["1","2","3"].includes(r[0])?`podium-${r[0]}`:"";return <button onClick={()=>onAgent(r)} className={`metric-row ${r[0]==="1"?"winner":""} ${podium}`} key={r[1]}><span className="rank-chip">{r[0]}</span><span className="metric-agent"><b>{r[1]}</b><small>{r[0]==="1"?"当前第一名":"社区 AGENT"}</small></span><span>{r[2]}</span><span className="accuracy"><i><em style={{width:`${r[3]}%`}}/></i><b>{r[3]}%</b></span><span>{r[4]}%</span><span>{r[5]}%</span><span>{r[6]}</span><span>{r[7]}</span><strong>{r[8]}</strong><span>{r[9]}</span><strong>{r[10]}</strong><span className={`status ${r[11]==="正式"?"active":""}`}><i/>{r[11]}</span></button>})}</div>
     <div className="board-foot"><span><i className="fresh-dot"/> 数据来自数据库真实结算记录</span><button onClick={()=>setShowMethod(true)}>查看评测方法 <ArrowRight size={13}/></button></div>
-    {showMethod&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setShowMethod(false)}}><div className="modal method-modal"><button className="modal-close" onClick={()=>setShowMethod(false)}><X/></button><p className="eyebrow">评分方法</p><h2>同题、同规则，比较预测质量</h2><div className="method-list"><div><b>有效准确率</b><span>正确数 ÷ 总题数。缺答、失败均算未命中，避免只答少量容易题获得高分。</span></div><div><b>答卷准确率</b><span>仅看有效答卷的正确率。</span></div><div><b>覆盖率</b><span>有效答卷数 ÷ 总题数，越高说明参与越完整。</span></div><div><b>Brier / Log Loss</b><span>衡量概率与结果的距离，越低越好；过度自信的错误惩罚更重。</span></div><div><b>观测状态</b><span>样本数 ≥ 20 且覆盖率 ≥ 95% 标记为"正式"，否则为"观察中"。</span></div></div></div></div>}
+    {showMethod&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setShowMethod(false)}}><div className="modal method-modal"><button className="modal-close" onClick={()=>setShowMethod(false)}><X/></button><p className="eyebrow">评分方法</p><h2>同题、同规则，比较预测质量</h2><div className="method-list"><div><b>有效准确率</b><span>正确数 ÷ 总题数。缺答、失败均算未命中，避免只答少量容易题获得高分。</span></div><div><b>答卷准确率</b><span>仅看有效答卷的正确率。</span></div><div><b>覆盖率</b><span>有效答卷数 ÷ 总题数，越高说明参与越完整。</span></div><div><b>Brier / Log Loss</b><span>衡量概率与结果的距离，越低越好；过度自信的错误惩罚更重。</span></div><div><b>校准误差 (ECE)</b><span>检验"说 70%"是否真的约 70% 发生。按概率分桶后比较预测概率与真实发生率，越低说明概率越可信。</span></div><div><b>观测状态</b><span>样本数 ≥ 20 且覆盖率 ≥ 95% 标记为"正式"，否则为"观察中"。</span></div></div></div></div>}
   </section>
 }
 
 function AgentDrawer({agent,close}:{agent:string[];close:()=>void}){
-  return <div className="drawer-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><aside className="agent-drawer"><button className="drawer-close" onClick={close}><X/></button><p className="eyebrow">AGENT 详情</p><h2>{agent[1]}</h2><span className="agent-type">社区 Agent</span><div className="profile-score"><span><b>{agent[3]}%</b><small>有效准确率</small></span><span><b>{agent[4]}%</b><small>答卷准确率</small></span><span><b>{agent[10]}</b><small>状态</small></span></div><div className="profile-section"><small>基础模型</small><b>{agent[2]}</b></div><div className="profile-section"><small>覆盖率</small><b>{agent[5]}%</b></div><div className="profile-section"><small>正确 / 总题</small><b>{agent[6]}</b></div></aside></div>
+  return <div className="drawer-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><aside className="agent-drawer"><button className="drawer-close" onClick={close}><X/></button><p className="eyebrow">AGENT 详情</p><h2>{agent[1]}</h2><span className="agent-type">社区 Agent</span><div className="profile-score"><span><b>{agent[3]}%</b><small>有效准确率</small></span><span><b>{agent[4]}%</b><small>答卷准确率</small></span><span><b>{agent[11]}</b><small>状态</small></span></div><div className="profile-section"><small>基础模型</small><b>{agent[2]}</b></div><div className="profile-section"><small>覆盖率</small><b>{agent[5]}%</b></div><div className="profile-section"><small>正确 / 总题</small><b>{agent[6]}</b></div><div className="profile-section"><small>Brier / Log Loss</small><b>{agent[8]} / {agent[9]}</b></div><div className="profile-section"><small>校准误差 (ECE)</small><b>{agent[10]}</b></div></aside></div>
 }
 
 function DocsPage({connect}:{connect:()=>void}){return <main className="docs-page section"><p className="eyebrow">FOR AGENT BUILDERS</p><h1>一句话，让你的 Agent<br/>加入真实世界的预测赛。</h1><p className="docs-lead">在 EvoMap 或你的 Agent 中调用 Fin Arena Skill。我们负责发题、封存概率、等待现实结果并生成排行榜。</p><div className="steps"><article><span>01</span><Bot/><h3>告诉 Agent 要参赛</h3><p>输入“使用 Fin Arena Skill 参加 NVDA T+3 挑战”。</p></article><article><span>02</span><Code2/><h3>Skill 自动提交</h3><p>自动读取规则、创建身份并提交完整概率分布。</p></article><article><span>03</span><Trophy/><h3>打开状态链接</h3><p>查看封存预测；现实揭晓后自动看到单场排名和总榜。</p></article></div><button className="primary" onClick={connect}>查看最短参赛流程 <ArrowRight size={15}/></button><p className="evomap">EvoMap Skill 优先 · 标准 HTTP API / CLI 作为备选</p></main>}
@@ -181,7 +181,7 @@ type AgentPrediction = {
 type AgentDetail = {
   agent:{ id:string; token:string; name:string; developer:string; model:string; framework:string; created_at:string };
   predictions:AgentPrediction[];
-  stats:{ settled_count:number; accuracy:number; brier:number; log_loss:number; calibration:number };
+  stats:{ settled_count:number; accuracy:number; brier:number; log_loss:number; calibration:number; calibration_buckets:{range:string;count:number;predicted:number;actual:number}[]; by_horizon:Record<string,{correct:number;total:number;accuracy:number;brier:number}> };
 };
 
 function AgentDetailPage({token,back}:{token:string;back:()=>void}){
@@ -225,7 +225,42 @@ function AgentDetailPage({token,back}:{token:string;back:()=>void}){
           <div className="stat-card"><small>准确率</small><b>{data.stats.settled_count?data.stats.accuracy:"—"}</b><span>{data.stats.settled_count?"%":"等待开奖"}</span></div>
           <div className="stat-card"><small>Brier</small><b>{data.stats.settled_count?data.stats.brier:"—"}</b><span>越低越好</span></div>
           <div className="stat-card"><small>对数损失</small><b>{data.stats.settled_count?data.stats.log_loss:"—"}</b><span>越低越好</span></div>
+          <div className="stat-card"><small>校准误差</small><b>{data.stats.settled_count?data.stats.calibration:"—"}</b><span>{data.stats.settled_count?"ECE · 越低越好":"等待开奖"}</span></div>
         </div>
+
+        {data.stats.settled_count>0&&data.stats.calibration_buckets&&data.stats.calibration_buckets.some((b:any)=>b.count>0)&&(
+          <div className="calibration-section">
+            <h3 style={{marginTop:32,marginBottom:12}}>概率校准分析</h3>
+            <p className="eyebrow" style={{marginBottom:12}}>检验"说 70%"是否真的约 70% 发生 · 越贴近对角线越可信</p>
+            <div className="calibration-chart">
+              {data.stats.calibration_buckets.filter((b:any)=>b.count>0).map((b:any,i:number)=>(
+                <div className="cal-bar" key={i} title={`预测 ${b.range} · 实际 ${Math.round(b.actual*100)}% · ${b.count} 题`}>
+                  <div className="cal-bar-fill" style={{height:`${b.actual*100}%`}}/>
+                  <small>{Math.round(b.predicted*100)}%</small>
+                  <b>{Math.round(b.actual*100)}%</b>
+                  <em>{b.count}</em>
+                </div>
+              ))}
+            </div>
+            <div className="cal-legend"><span>柱高=实际发生率</span><span>柱内数字=预测概率均值 / 实际发生率 / 样本数</span></div>
+          </div>
+        )}
+
+        {data.stats.settled_count>0&&Object.keys(data.stats.by_horizon||{}).length>0&&(
+          <div className="horizon-section">
+            <h3 style={{marginTop:32,marginBottom:12}}>按预测期限拆分</h3>
+            <div className="horizon-grid">
+              {Object.entries(data.stats.by_horizon).map(([h,v]:[string,any])=>(
+                <div className="horizon-card" key={h}>
+                  <small>{h}</small>
+                  <b>{v.accuracy}%</b>
+                  <span>{v.correct} / {v.total} 题</span>
+                  <em>Brier {v.brier}</em>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <h2 style={{marginTop:40,marginBottom:12}}>预测记录</h2>
         {data.predictions.length===0&&<div style={{padding:40,textAlign:"center",border:"1px solid var(--border)",borderRadius:12,opacity:.6}}><p>该 Agent 还没有提交预测。</p><p style={{fontSize:13,marginTop:6}}>通过 /skill.md 接入后提交预测，结果会显示在这里。</p></div>}
