@@ -1,27 +1,4 @@
-import type { AgentTask, LeaderboardRow, FinArenaService, PublicQuestion } from "./types";
-
-export const defaultQuestions: PublicQuestion[] = [
-  {id:"fed-rate",source:"系统出题",tag:"宏观",title:"美联储会在下一次议息会议上降息吗？",due:"6 天后截止",agents:18,yes:68},
-  {id:"nvda-revenue",source:"用户提问",tag:"公司财报",title:"英伟达下一季度营收会超过市场预期吗？",due:"11 月 18 日截止",agents:12,yes:74},
-  {id:"btc-150k",source:"系统出题",tag:"加密资产",title:"比特币会在年底前突破 15 万美元吗？",due:"12 月 31 日截止",agents:23,yes:41},
-];
-
-const fallbackBoard: LeaderboardRow[] = [
-  ["1","Fin-Arena-RLVR-v2","GPT-4o","70.9","0.198","0.512","0.082","$0.034","Active"],
-  ["2","Claude-Finance-v1","Claude 3.5 Sonnet","67.8","0.215","0.568","0.098","$0.028","Active"],
-  ["3","DeepSeek-Finance","DeepSeek V3","64.7","0.231","0.595","0.121","$0.004","Active"],
-  ["4","Fin-Arena-Baseline","GPT-4o","63.2","0.241","0.621","0.143","$0.031","Active"],
-  ["5","Gemini-Finance-1.5","Gemini 1.5 Pro","62.8","0.247","0.632","0.155","$0.006","Active"],
-  ["6","Random-Baseline","N/A","49.8","0.333","0.693","0.250","$0.000","Benchmark"],
-];
-
-export const fallbackForecastBoard: LeaderboardRow[] = [
-  ["1","Atlas Team","Multi-Agent","71.4","0.181","0.493","0.071","—","Official"],
-  ["2","MacroFox","GPT-5","69.8","0.184","0.501","0.076","$0.041","Settled"],
-  ["3","Pulse Team","Multi-Agent","68.2","0.196","0.526","0.084","—","Official"],
-  ["4","Signal Hunter","Claude Sonnet 4","66.9","0.207","0.551","0.091","$0.029","Settled"],
-  ["5","Horizon Team","Multi-Agent","65.7","0.218","0.576","0.104","—","Official"],
-];
+import type { AgentTask, FinArenaService, PublicQuestion } from "./types";
 
 const read = <T>(storage: Storage, key: string, fallback: T): T => {
   try { return JSON.parse(storage.getItem(key) || "null") ?? fallback; } catch { return fallback; }
@@ -55,18 +32,14 @@ export const finArenaService: FinArenaService = {
     sessionStorage.setItem("finarena_agent_token", agent.token);
   },
   async listQuestions() {
-    try { return await apiListQuestions(); } catch { return read(localStorage, "finarena_public_questions", defaultQuestions); }
+    try { return await apiListQuestions(); } catch { return []; }
   },
   async createQuestion(title, due) {
     try {
       await request("/api/questions", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,due})});
       return await apiListQuestions();
     } catch {
-      const current = read(localStorage, "finarena_public_questions", defaultQuestions);
-      if (current.some(question => question.title === title)) return current;
-      const next = [{id:`user-${Date.now()}`,source:"用户提问",tag:"用户预测",title,due,agents:3,yes:64}, ...current];
-      localStorage.setItem("finarena_public_questions", JSON.stringify(next));
-      return next;
+      return [];
     }
   },
   async listAgentTasks() { return read(localStorage, "finarena_agent_tasks", [] as AgentTask[]); },
@@ -86,10 +59,7 @@ export const finArenaService: FinArenaService = {
       });
       return { tasks: nextTasks, questions: await apiListQuestions() };
     } catch {
-      const questions = await this.listQuestions();
-      const nextQuestions = questions.map(item => item.title === question ? {...item, agents:item.agents + 1} : item);
-      localStorage.setItem("finarena_public_questions", JSON.stringify(nextQuestions));
-      return { tasks: nextTasks, questions: nextQuestions };
+      return { tasks: nextTasks, questions: await this.listQuestions() };
     }
   },
   async listFollowedQuestions() { return read(localStorage, "finarena_followed", [] as string[]); },
@@ -99,15 +69,15 @@ export const finArenaService: FinArenaService = {
     localStorage.setItem("finarena_followed", JSON.stringify(next));
     return next;
   },
-  async getBacktestLeaderboard(challengeId) {
+  async getBacktestLeaderboard() {
     try {
-      const response = await fetch(`/api/playground/leaderboard?challenge_id=${encodeURIComponent(challengeId)}`);
-      if (!response.ok) throw new Error("leaderboard unavailable");
-      const data = await response.json();
-      return data.items
-        .filter((item: {name:string}) => !item.name.startsWith("Demo Agent") && item.name !== "Fin Arena Demo Agent")
-        .map((item: Record<string, unknown>, index: number) => [String(index+1),String(item.name),String(item.model||"Custom"),String(Math.round(Number(item.accuracy)*1000)/10),Number(item.brier||0).toFixed(3),Number(item.log_loss||0).toFixed(3),Number(item.calibration||0).toFixed(3),"—","Active"]);
-    } catch { return fallbackBoard; }
+      const data = await request<{items: Record<string, unknown>[]}>("/api/playground/leaderboard");
+      return data.items.map((item, index) => [
+        String(index+1),String(item.name),String(item.model||"Custom"),
+        String(Math.round(Number(item.accuracy)*1000)/10),Number(item.brier||0).toFixed(3),
+        Number(item.log_loss||0).toFixed(3),Number(item.calibration||0).toFixed(3),"—","Settled",
+      ]);
+    } catch { return []; }
   },
   async getForecastLeaderboard() {
     try {
@@ -117,7 +87,7 @@ export const finArenaService: FinArenaService = {
         String(Math.round(Number(item.accuracy)*1000)/10),Number(item.brier||0).toFixed(3),
         Number(item.log_loss||0).toFixed(3),Number(item.calibration||0).toFixed(3),"—","Settled",
       ]);
-    } catch { return fallbackForecastBoard; }
+    } catch { return []; }
   },
   async registerAgent(input) {
     const response = await fetch("/api/playground/agents", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...input,evomap_agent_id:""})});

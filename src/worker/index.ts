@@ -179,14 +179,12 @@ app.post("/api/questions/:id/settle", async (c) => {
 // ---------------------------------------------------------------------------
 // 排行榜
 // ---------------------------------------------------------------------------
-app.get("/api/leaderboard/forecast", async (c) => {
-  // 从已结算预测实时计算各 Agent 成绩
-  const { results } = await c.env.DB.prepare(
+async function computeLeaderboard(db: D1Database) {
+  const { results } = await db.prepare(
     "SELECT agent_id, agent_name, direction, probability, outcome FROM predictions WHERE outcome IS NOT NULL"
   ).all<{ agent_id: string; agent_name: string; direction: string; probability: number; outcome: string }>();
 
-  // 获取所有 Agent 的 model 信息
-  const { results: agents } = await c.env.DB.prepare(
+  const { results: agents } = await db.prepare(
     "SELECT id, model FROM agents"
   ).all<{ id: string; model: string }>();
   const agentModelMap = new Map(agents.map((a) => [a.id, a.model]));
@@ -210,27 +208,18 @@ app.get("/api/leaderboard/forecast", async (c) => {
     log_loss: s.total ? s.lossSum / s.total : 0,
     calibration: 0, settled_count: s.total,
   }));
-  if (items.length === 0) {
-    items = [
-      { id: "demo-1", name: "Atlas Team", model: "Multi-Agent", accuracy: 0.714, brier: 0.181, log_loss: 0.493, calibration: 0.071, settled_count: 14 },
-      { id: "demo-2", name: "MacroFox", model: "GPT-5", accuracy: 0.698, brier: 0.184, log_loss: 0.501, calibration: 0.076, settled_count: 12 },
-      { id: "demo-3", name: "Pulse Team", model: "Multi-Agent", accuracy: 0.682, brier: 0.196, log_loss: 0.526, calibration: 0.084, settled_count: 11 },
-    ];
-  }
   items.sort((a, b) => b.accuracy - a.accuracy || a.brier - b.brier);
   items = items.map((it, i) => ({ ...it, rank: i + 1 }));
+  return items;
+}
+
+app.get("/api/leaderboard/forecast", async (c) => {
+  const items = await computeLeaderboard(c.env.DB);
   return c.json({ items });
 });
 
-app.get("/api/playground/leaderboard", (c) => {
-  const items = [
-    { name: "Fin-Arena-RLVR-v2", model: "GPT-4o", accuracy: 0.709, brier: 0.198, log_loss: 0.512, calibration: 0.082 },
-    { name: "Claude-Finance-v1", model: "Claude 3.5 Sonnet", accuracy: 0.678, brier: 0.215, log_loss: 0.568, calibration: 0.098 },
-    { name: "DeepSeek-Finance", model: "DeepSeek V3", accuracy: 0.647, brier: 0.231, log_loss: 0.595, calibration: 0.121 },
-    { name: "Fin-Arena-Baseline", model: "GPT-4o", accuracy: 0.632, brier: 0.241, log_loss: 0.621, calibration: 0.143 },
-    { name: "Gemini-Finance-1.5", model: "Gemini 1.5 Pro", accuracy: 0.628, brier: 0.247, log_loss: 0.632, calibration: 0.155 },
-    { name: "Random-Baseline", model: "N/A", accuracy: 0.498, brier: 0.333, log_loss: 0.693, calibration: 0.25 },
-  ];
+app.get("/api/playground/leaderboard", async (c) => {
+  const items = await computeLeaderboard(c.env.DB);
   return c.json({ items });
 });
 
