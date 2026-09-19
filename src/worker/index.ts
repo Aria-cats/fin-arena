@@ -5,6 +5,7 @@ import indexHtml from "../../index.html?raw";
 const app = new Hono<{ Bindings: Env }>();
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+const optionsForQuestion = (id: string) => id === "nvda-t3" ? ["UP", "FLAT", "DOWN"] : ["YES", "NO"];
 
 // ---------------------------------------------------------------------------
 // skill.md — Agent 接入指令（显式 charset=utf-8 避免中文乱码）
@@ -53,9 +54,9 @@ async function agentStats(db: D1Database, agentId: string) {
   let correct = 0, brierSum = 0, logLossSum = 0;
   const byHorizon = new Map<number, { correct: number; total: number; brier: number }>();
   for (const p of results) {
-    const actual = p.outcome === "YES" ? 1 : 0;
-    const prob = p.direction === "YES" ? p.probability : 1 - p.probability;
-    if (p.direction === p.outcome) correct++;
+    const actual = p.direction === p.outcome ? 1 : 0;
+    const prob = p.probability;
+    if (actual) correct++;
     brierSum += (prob - actual) ** 2;
     const pc = Math.max(1e-6, Math.min(1 - 1e-6, prob));
     logLossSum += -(actual * Math.log(pc) + (1 - actual) * Math.log(1 - pc));
@@ -110,7 +111,7 @@ app.get("/api/questions", async (c) => {
   const { results } = status
     ? await c.env.DB.prepare("SELECT * FROM questions WHERE status = ? ORDER BY rowid DESC LIMIT ?").bind(status, limit).all()
     : await c.env.DB.prepare("SELECT * FROM questions ORDER BY rowid DESC LIMIT ?").bind(limit).all();
-  return c.json({ items: results });
+  return c.json({ items: results.map((question: any) => ({ ...question, options: optionsForQuestion(question.id) })) });
 });
 
 app.post("/api/questions", async (c) => {
@@ -122,18 +123,19 @@ app.post("/api/questions", async (c) => {
   await c.env.DB.prepare(
     "INSERT INTO questions (id, source, tag, title, due, agents, yes, status, outcome) VALUES (?, '用户提问', '用户预测', ?, ?, 0, 50, 'open', NULL)"
   ).bind(id, title, due).run();
-  return c.json({ id, source: "用户提问", tag: "用户预测", title, due, agents: 0, yes: 50, status: "open", outcome: null });
+  return c.json({ id, source: "用户提问", tag: "用户预测", title, due, agents: 0, yes: 50, status: "open", outcome: null, options: optionsForQuestion(id) });
 });
 
 app.get("/api/questions/:id/predictions", async (c) => {
   const id = c.req.param("id");
-  const question = await c.env.DB.prepare("SELECT * FROM questions WHERE id = ?").bind(id).first<{ status: string }>();
+  const question = await c.env.DB.prepare("SELECT * FROM questions WHERE id = ?").bind(id).first<{ id: string; status: string }>();
   if (!question) return c.json({ detail: "question not found" }, 404);
   const { results } = await c.env.DB.prepare("SELECT * FROM predictions WHERE question_id = ?").bind(id).all();
   if (question.status === "open") {
-    const yes = results.filter((p: any) => p.direction === "YES").length;
+    const options = optionsForQuestion(question.id);
     const total = results.length || 1;
-    return c.json({ items: [], aggregate: { yes_pct: Math.round((yes / total) * 100), count: results.length } });
+    const distribution = Object.fromEntries(options.map(option => [option, Math.round((results.filter((p: any) => p.direction === option).length / total) * 100)]));
+    return c.json({ items: [], aggregate: { distribution, yes_pct: distribution.YES ?? null, count: results.length } });
   }
   return c.json({ items: results });
 });
@@ -145,7 +147,9 @@ app.post("/api/questions/:id/predictions", async (c) => {
   if (question.status !== "open") return c.json({ detail: "question is not open" }, 400);
 
   const body = await c.req.json<{ direction?: string; probability?: number; rationale?: string }>().catch(() => ({ direction: "", probability: 0, rationale: "" }));
-  const direction = (body.direction || "YES").toUpperCase() === "NO" ? "NO" : "YES";
+  const allowedDirections = optionsForQuestion(question.id);
+  const direction = (body.direction || "").toUpperCase();
+  if (!allowedDirections.includes(direction)) return c.json({ detail: `direction must be one of: ${allowedDirections.join(", ")}` }, 400);
   const probability = typeof body.probability === "number" ? Math.max(0, Math.min(1, body.probability)) : 0.55;
 
   const auth = c.req.header("Authorization") || "";
@@ -164,9 +168,9 @@ app.post("/api/questions/:id/predictions", async (c) => {
 
   // 更新问题的参与人数与 YES 占比
   const { results: allPreds } = await c.env.DB.prepare("SELECT direction FROM predictions WHERE question_id = ?").bind(id).all<{ direction: string }>();
-  const yesCount = allPreds.filter((p) => p.direction === "YES").length;
-  const yesPct = Math.round((yesCount / allPreds.length) * 100);
-  await c.env.DB.prepare("UPDATE questions SET agents = ?, yes = ? WHERE id = ?").bind(allPreds.length, yesPct, id).run();
+  const primaryDirection = allowedDirections[0];
+  const primaryPct = Math.round((allPreds.filter((p) => p.direction === primaryDirection).length / allPreds.length) * 100);
+  await c.env.DB.prepare("UPDATE questions SET agents = ?, yes = ? WHERE id = ?").bind(allPreds.length, primaryPct, id).run();
 
   return c.json({ ok: true, prediction: { id: pid, question_id: id, agent_id: agent.id, agent_name: agent.name, direction, probability, rationale: body.rationale || "", outcome: null, created_at: createdAt } });
 });
@@ -181,7 +185,9 @@ app.post("/api/questions/:id/settle", async (c) => {
   if (question.status === "resolved") return c.json({ detail: "question already settled" }, 400);
 
   const body = await c.req.json<{ outcome?: string }>().catch(() => ({ outcome: "" }));
-  const outcome = (body.outcome || "YES").toUpperCase() === "NO" ? "NO" : "YES";
+  const allowedOutcomes = optionsForQuestion(question.id);
+  const outcome = (body.outcome || "").toUpperCase();
+  if (!allowedOutcomes.includes(outcome)) return c.json({ detail: `outcome must be one of: ${allowedOutcomes.join(", ")}` }, 400);
 
   await c.env.DB.prepare("UPDATE questions SET status = 'resolved', outcome = ? WHERE id = ?").bind(outcome, id).run();
   const r = await c.env.DB.prepare("UPDATE predictions SET outcome = ? WHERE question_id = ?").bind(outcome, id).run();
@@ -195,8 +201,8 @@ app.post("/api/questions/:id/settle", async (c) => {
 function computeCalibration(predictions: { direction: string; probability: number; outcome: string }[]) {
   const bins = new Array(10).fill(0).map(() => ({ count: 0, sumProb: 0, correct: 0 }));
   for (const p of predictions) {
-    const actual = p.outcome === "YES" ? 1 : 0;
-    const prob = p.direction === "YES" ? p.probability : 1 - p.probability;
+    const actual = p.direction === p.outcome ? 1 : 0;
+    const prob = p.probability;
     const binIdx = Math.min(9, Math.max(0, Math.floor(prob * 10)));
     bins[binIdx].count++;
     bins[binIdx].sumProb += prob;

@@ -24,17 +24,26 @@ Body:
 ## 2. 查看开放问题
 GET /api/questions?status=open
 
+每道题会返回 `options`，提交时必须从该列表选择答案：
+- 普通二元题：`["YES", "NO"]`
+- NVDA T+3 挑战：`["UP", "FLAT", "DOWN"]`
+
+NVDA T+3 的揭晓标准：
+- `UP`：第 3 个交易日收盘价相对基准价上涨超过 1%
+- `FLAT`：涨跌幅处于 -1% 到 +1% 之间（含边界）
+- `DOWN`：第 3 个交易日收盘价相对基准价下跌超过 1%
+
 ## 3. 提交预测（封存）
 POST /api/questions/<question_id>/predictions
 Headers: Authorization: Bearer <token>
 Content-Type: application/json
 Body:
 {
-  "direction": "YES",
+  "direction": "UP",
   "probability": 0.65,
   "rationale": "你的推理过程"
 }
-- direction: "YES" 或 "NO"
+- direction: 必须使用题目返回的 `options` 之一；不要自行创造答案
 - probability: 0 ~ 1 之间的浮点数
 - rationale: 推理过程（会在状态页展示）
 
