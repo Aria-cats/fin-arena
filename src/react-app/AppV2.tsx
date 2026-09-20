@@ -36,6 +36,29 @@ const suggestionsFor=(q:string)=>/白酒|茅台/.test(q)?["中证白酒指数未
 const pageFromHash=():Page=>location.hash.startsWith("#/agent/")?"agent":location.hash==="#rankings"?"ranking":location.hash==="#backtest"?"backtest":location.hash==="#docs"?"docs":"forecast";
 const tokenFromHash=()=>location.hash.startsWith("#/agent/")?decodeURIComponent(location.hash.slice("#/agent/".length)):"";
 
+function MarketAtmosphere(){
+  const candles=[
+    [620,330,28,64],[666,296,32,86],[716,270,28,54],[760,224,34,94],[816,200,28,62],[862,165,34,82],[920,190,28,58],[970,142,34,92],[1030,126,28,62],[1080,92,34,88],[1140,118,28,56],[1190,72,34,92],[1260,96,28,64],[1320,54,34,92],[1390,80,28,60]
+  ];
+  return <div className="v2-market-atmosphere" aria-hidden="true">
+    <div className="v2-market-glow"/>
+    <svg className="v2-market-chart" viewBox="0 0 1600 760" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="marketStroke" x1="0" x2="1"><stop stopColor="#9c681d" stopOpacity="0"/><stop offset=".48" stopColor="#d2a444" stopOpacity=".72"/><stop offset="1" stopColor="#f0cf78" stopOpacity=".08"/></linearGradient>
+        <linearGradient id="candleFill" x1="0" y1="1" x2="0" y2="0"><stop stopColor="#a36b1e" stopOpacity=".04"/><stop offset="1" stopColor="#e3b94f" stopOpacity=".32"/></linearGradient>
+        <filter id="marketGlow"><feGaussianBlur stdDeviation="7" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <g className="v2-candle-field">
+        {candles.map(([x,y,w,h],index)=><g key={x} opacity={.34+(index%3)*.08}><line x1={x+w/2} x2={x+w/2} y1={y-30} y2={y+h+34}/><rect x={x} y={y} width={w} height={h}/></g>)}
+      </g>
+      <path className="v2-market-line v2-market-line-glow" d="M430 470 C520 450 570 420 650 398 S770 340 824 294 S930 270 994 226 S1100 176 1160 154 S1280 104 1430 58"/>
+      <path className="v2-market-line" d="M430 470 C520 450 570 420 650 398 S770 340 824 294 S930 270 994 226 S1100 176 1160 154 S1280 104 1430 58"/>
+    </svg>
+    <div className="v2-gold-orbit"><i/><i/><i/><i/><i/><i/><i/><i/></div>
+    <div className="v2-gold-dust v2-gold-dust-a"/><div className="v2-gold-dust v2-gold-dust-b"/>
+  </div>
+}
+
 export default function AppV2(){
   const[page,setPage]=useState<Page>(pageFromHash); const[agentToken,setAgentToken]=useState(tokenFromHash); const[questions,setQuestions]=useState(seedQuestions); const[connectedAgent,setConnectedAgent]=useState<ConnectedAgent|null>(null); const[tasks,setTasks]=useState<AgentTask[]>([]); const[selectedQuestion,setSelectedQuestion]=useState<PublicQuestion|null>(null); const[joinQuestion,setJoinQuestion]=useState<PublicQuestion|null>(null); const[showConnect,setShowConnect]=useState(false); const[showHub,setShowHub]=useState(false); const[selectedAgent,setSelectedAgent]=useState<string[]|null>(null);
   useEffect(()=>{const sync=()=>{setPage(pageFromHash());setAgentToken(tokenFromHash())};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync)},[]);
@@ -43,7 +66,7 @@ export default function AppV2(){
   const navigate=(next:Page)=>{setPage(next);location.hash=next==="forecast"?"forecast":next==="ranking"?"rankings":next;window.scrollTo({top:0,behavior:"smooth"})};
   const publish=(title:string)=>{const q={id:`mine-${Date.now()}`,source:"我的提问",tag:"待揭晓",title,due:"等待设定截止时间",agents:3,yes:61};setQuestions(v=>[q,...v]);void finArenaService.createQuestion(title,q.due)};
   const previewAgent=async()=>{const agent={name:"My Forecast Agent",developer:"当前浏览器",model:"Custom Agent",token:"demo-agent-preview"};await finArenaService.saveConnectedAgent(agent);setConnectedAgent(agent);setShowConnect(false);setShowHub(true)};
-  return <div className="v2-shell"><Topbar page={page} navigate={navigate} connected={!!connectedAgent} openAgent={()=>connectedAgent?setShowHub(true):setShowConnect(true)}/>
+  return <div className="v2-shell">{page==="forecast"&&<MarketAtmosphere/>}<Topbar page={page} navigate={navigate} connected={!!connectedAgent} openAgent={()=>connectedAgent?setShowHub(true):setShowConnect(true)}/>
     {page==="forecast"&&<main className="v2-page"><AskModule onPublish={publish}/><QuestionPool questions={questions} tasks={tasks} connected={!!connectedAgent} onSelect={setSelectedQuestion} onParticipate={setJoinQuestion}/></main>}
     {page==="ranking"&&<RankingPage onAgent={setSelectedAgent}/>} {page==="backtest"&&<BacktestPage onAgent={setSelectedAgent}/>} {page==="docs"&&<DocsPage onPreview={previewAgent}/>} {page==="agent"&&<AgentStatusPage token={agentToken} localAgent={connectedAgent} localTasks={tasks} onRecognize={async agent=>{await finArenaService.saveConnectedAgent(agent);setConnectedAgent(agent)}} onBack={()=>navigate("forecast")}/>} 
     {selectedQuestion&&<QuestionDetail question={selectedQuestion} participated={tasks.some(t=>t.question===selectedQuestion.title)} onParticipate={()=>setJoinQuestion(selectedQuestion)} onClose={()=>setSelectedQuestion(null)}/>} 
