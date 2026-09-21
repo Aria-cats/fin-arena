@@ -174,6 +174,20 @@ body::before{opacity:.14!important}
 
 @media(max-width:900px){.v2-shell{background-size:64px 64px,64px 64px,cover,auto 760px}.v2-detail,.v2-connect-modal{border-radius:12px}.v2-agent-drawer{border-radius:12px 0 0 12px}}
 
+/* Champagne-metal correction: remove the yellow/orange “luxury gold” cast. */
+.v2-shell{--v2-bg:#070807;--v2-panel:rgba(15,15,12,.9);--v2-panel-2:rgba(21,20,16,.9);--v2-line:rgba(199,184,143,.2);--v2-gold:#bca875;--v2-gold-2:#e2d6b5;--v2-text:#efede7;--v2-muted:#96938a;background-image:linear-gradient(rgba(201,187,148,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(201,187,148,.018) 1px,transparent 1px),linear-gradient(180deg,rgba(5,7,7,.79),rgba(7,7,6,.93)),url('/arena-atmosphere.png')}
+.v2-atmosphere-image{opacity:.48;filter:saturate(.38) brightness(.64) contrast(1.1)}
+.v2-atmosphere-bloom{background:radial-gradient(ellipse at 73% 9%,rgba(211,196,155,.075),transparent 34%),linear-gradient(90deg,rgba(6,8,8,.34),transparent 24%,transparent 76%,rgba(5,7,7,.2) 100%);mix-blend-mode:normal}
+@keyframes v2-atmosphere-drift{0%{transform:scale(1.025) translate3d(-4px,1px,0);filter:saturate(.34) brightness(.61) contrast(1.12)}100%{transform:scale(1.04) translate3d(6px,-3px,0);filter:saturate(.43) brightness(.68) contrast(1.08)}}
+.v2-kicker{color:#bba777;text-shadow:0 0 18px rgba(194,178,137,.1)}
+.v2-ask-copy h1 em,.v2-ranking-hero h1 em,.v2-docs-hero h1 em{background:linear-gradient(105deg,#b9a36e 5%,#eadfbe 52%,#aa9461 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none}
+.v2-topbar nav button.active,.v2-tabs button.active,.v2-shell .primary,.v2-composer-foot>button{background:linear-gradient(135deg,#aa9562,#d6c48f 58%,#a58f5b)!important;border-color:#c8b47f!important;box-shadow:inset 0 1px rgba(255,255,255,.24),0 7px 22px rgba(0,0,0,.2)}
+.v2-agent-entry{border-color:rgba(201,181,126,.5);color:#d9ccaa}.v2-brand-mark{border-color:rgba(196,177,124,.48);box-shadow:inset 0 0 22px rgba(198,181,138,.035)}
+.v2-composer,.v2-flow-panel,.v2-featured-card,.v2-agent-cards article,.v2-question-grid>article,.v2-table,.v2-backtest-summary,.v2-demo-run,.v2-demo-result,.v2-prompt-box,.v2-doc-steps article,.v2-dev-panel,.v2-detail,.v2-connect-modal,.v2-agent-drawer,.v2-status-error{background:linear-gradient(145deg,rgba(18,18,15,.92),rgba(8,9,8,.95));box-shadow:inset 0 1px rgba(238,229,202,.025),0 20px 60px rgba(0,0,0,.22)}
+.v2-featured-card{border-color:rgba(200,181,126,.3);background:radial-gradient(circle at 18% 25%,rgba(176,158,111,.07),transparent 25rem),linear-gradient(140deg,rgba(19,18,14,.94),rgba(8,9,8,.96))}
+.v2-distribution em{background:linear-gradient(90deg,#8f7d51,#d4c28d)}.v2-deadline b,.v2-table-row .score,.v2-single-board strong{color:#d6c79e;text-shadow:none}
+.v2-doc-steps article>span{color:#c5b17a;text-shadow:none}.v2-prompt-primary{background:radial-gradient(circle at 20% 50%,rgba(189,170,117,.07),transparent 28rem),linear-gradient(145deg,rgba(19,18,14,.94),rgba(8,9,8,.96))}
+
 /* Warm stage background — espresso black, restrained amber haze and fine grain. */
 html,body,#root{background:#070504!important}
 body::before{content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.115;background-image:radial-gradient(circle,rgba(244,214,164,.28) 0 .45px,transparent .65px);background-size:4px 4px;mix-blend-mode:soft-light}
