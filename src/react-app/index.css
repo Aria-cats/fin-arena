@@ -625,3 +625,12 @@ small,.metric-agent small,.board-foot,.feed-list .index,.feed-list p,.question-s
 .v2-arena-dashboard .v2-table{border-radius:2px}
 @media(max-width:1050px){.v2-ranking-workbench{grid-template-columns:250px minmax(0,1fr)}.v2-compare-grid{grid-template-columns:1fr}.v2-performance-chart{border-right:0;border-bottom:1px solid var(--line)}.v2-confidence-panel{display:grid;grid-template-columns:repeat(2,1fr);gap:0 20px}.v2-confidence-panel .v2-chart-title{grid-column:1/-1}}
 @media(max-width:760px){.v2-arena-dashboard .v2-ranking-hero{display:block}.v2-arena-dashboard .v2-tabs{margin-top:18px}.v2-rank-signal{align-items:flex-start;flex-direction:column;gap:5px}.v2-arena-dashboard .v2-podium{display:grid}.v2-arena-dashboard .v2-podium-card,.v2-arena-dashboard .v2-podium-card.rank-1{order:initial;min-height:220px}.v2-ranking-workbench{grid-template-columns:1fr}.v2-model-pool{border-right:0;border-bottom:1px solid var(--line)}.v2-compare-grid{display:block}.v2-confidence-panel{display:block}}
+
+/* Public question visibility toggle */
+.v2-public-toggle{position:relative;user-select:none}
+.v2-public-toggle input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.v2-public-toggle>span{background:transparent!important;color:transparent!important;transition:background .16s ease,color .16s ease,box-shadow .16s ease}
+.v2-public-toggle>span svg{opacity:0;transition:opacity .16s ease}
+.v2-public-toggle input:checked+span{background:var(--v2-gold)!important;color:#171105!important;box-shadow:0 0 12px rgba(213,185,77,.22)}
+.v2-public-toggle input:checked+span svg{opacity:1}
+.v2-public-toggle input:focus-visible+span{outline:2px solid var(--bone);outline-offset:3px}
