@@ -112,6 +112,6 @@ export const finArenaService: FinArenaService = {
   },
   async resetDemo() {
     ["finarena_connected_agent","finarena_agent_token"].forEach(key => sessionStorage.removeItem(key));
-    ["finarena_agent_tasks","finarena_followed","finarena_public_questions"].forEach(key => localStorage.removeItem(key));
+    ["finarena_agent_tasks","finarena_followed","finarena_public_questions","finarena_my_questions"].forEach(key => localStorage.removeItem(key));
   },
 };

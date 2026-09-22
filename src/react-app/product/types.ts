@@ -8,6 +8,7 @@ export type PublicQuestion = {
   due: string;
   agents: number;
   yes: number;
+  isPublic?: boolean;
 };
 
 export type AgentTask = { question: string; status: string };
