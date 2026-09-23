@@ -1,0 +1,2 @@
+# Required by the protected settlement endpoint. Use a long random value in production.
+ADMIN_TOKEN=replace-with-a-secure-random-token

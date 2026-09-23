@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import skillMd from "./skill.md?raw";
 import indexHtml from "../../index.html?raw";
 
@@ -6,6 +7,22 @@ const app = new Hono<{ Bindings: Env }>();
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const optionsForQuestion = (id: string) => id === "nvda-t3" ? ["UP", "FLAT", "DOWN"] : ["YES", "NO"];
+const nowIso = () => new Date().toISOString();
+const secureToken = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
+const hashToken = async (token: string) => {
+  const data = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+const jsonError = (c: any, status: number, code: string, message: string) => c.json({ error: { code, message } }, status);
+const sessionAgent = async (c: any) => {
+  const raw = getCookie(c, "pronoia_session");
+  if (!raw) return null;
+  const hash = await hashToken(raw);
+  return c.env.DB.prepare(`SELECT a.agent_id,a.name,a.developer,a.model,a.framework,a.created_at
+    FROM browser_sessions s JOIN future_agents a ON a.agent_id=s.agent_id
+    WHERE s.session_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`).bind(hash, nowIso()).first();
+};
 
 // ---------------------------------------------------------------------------
 // skill.md — Agent 接入指令（显式 charset=utf-8 避免中文乱码）
@@ -18,6 +35,152 @@ app.get("/skill.md", (c) =>
 // 健康检查
 // ---------------------------------------------------------------------------
 app.get("/api/health", (c) => c.json({ ok: true, service: "fin-arena", time: new Date().toISOString() }));
+
+// ---------------------------------------------------------------------------
+// Real future forecast API (isolated from historical playground data)
+// ---------------------------------------------------------------------------
+app.get("/api/future/questions", async (c) => {
+  const { results } = await c.env.DB.prepare(`SELECT q.*,
+    (SELECT COUNT(*) FROM forecast_submissions s WHERE s.question_id=q.question_id) AS agent_count
+    FROM future_questions q ORDER BY q.created_at DESC`).all();
+  return c.json({ items: results.map((q: any) => ({ ...q, rules: JSON.parse(q.rules_json), rules_json: undefined })) });
+});
+
+app.get("/api/future/questions/:id", async (c) => {
+  const q = await c.env.DB.prepare(`SELECT q.*,
+    (SELECT COUNT(*) FROM forecast_submissions s WHERE s.question_id=q.question_id) AS agent_count
+    FROM future_questions q WHERE q.question_id=?`).bind(c.req.param("id")).first<any>();
+  if (!q) return jsonError(c, 404, "QUESTION_NOT_FOUND", "赛题不存在");
+  return c.json({ ...q, rules: JSON.parse(q.rules_json), rules_json: undefined });
+});
+
+app.post("/api/future/agents", async (c) => {
+  const body = await c.req.json<any>().catch(() => ({}));
+  const name = String(body.name || "").trim();
+  const developer = String(body.developer || "").trim();
+  const model = String(body.model || "").trim();
+  const framework = String(body.framework || "").trim();
+  if (!name || !developer || !model || !framework) return jsonError(c, 400, "INVALID_AGENT", "名称、开发者、模型和框架均为必填项");
+  const agentId = `agent_${crypto.randomUUID()}`;
+  const token = secureToken("pronoia");
+  const createdAt = nowIso();
+  await c.env.DB.prepare(`INSERT INTO future_agents(agent_id,name,developer,model,framework,token_hash,created_at)
+    VALUES(?,?,?,?,?,?,?)`).bind(agentId, name, developer, model, framework, await hashToken(token), createdAt).run();
+  return c.json({ agent_id: agentId, name, developer, model, framework, created_at: createdAt, agent_token: token }, 201);
+});
+
+app.post("/api/future/questions/:id/submissions", async (c) => {
+  const questionId = c.req.param("id");
+  const auth = c.req.header("Authorization") || "";
+  const rawToken = auth.replace(/^Bearer\s+/i, "");
+  if (!rawToken) return jsonError(c, 401, "INVALID_AGENT_TOKEN", "缺少 Agent token");
+  const agent = await c.env.DB.prepare("SELECT agent_id,name FROM future_agents WHERE token_hash=?").bind(await hashToken(rawToken)).first<any>();
+  if (!agent) return jsonError(c, 401, "INVALID_AGENT_TOKEN", "Agent token 无效");
+  const question = await c.env.DB.prepare("SELECT * FROM future_questions WHERE question_id=?").bind(questionId).first<any>();
+  if (!question) return jsonError(c, 404, "QUESTION_NOT_FOUND", "赛题不存在");
+  if (question.status !== "open" || Date.parse(question.closes_at) <= Date.now()) return jsonError(c, 409, "QUESTION_CLOSED", "赛题已截止，无法提交");
+  const body = await c.req.json<any>().catch(() => ({}));
+  const probabilities = [body.probability_up, body.probability_flat, body.probability_down];
+  if (probabilities.some((v) => typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1)) return jsonError(c, 400, "INVALID_PROBABILITY", "UP、FLAT、DOWN 概率必须是 0 到 1 之间的数字");
+  const sum = probabilities.reduce((a: number, b: number) => a + b, 0);
+  if (Math.abs(sum - 1) > 1e-6) return jsonError(c, 400, "INVALID_PROBABILITY_SUM", "UP、FLAT、DOWN 三项概率总和必须为 1");
+  const duplicate = await c.env.DB.prepare("SELECT submission_id FROM forecast_submissions WHERE agent_id=? AND question_id=?").bind(agent.agent_id, questionId).first();
+  if (duplicate) return jsonError(c, 409, "ALREADY_SUBMITTED", "该 Agent 已提交过本题，封存后不可修改");
+  const submissionId = `sub_${crypto.randomUUID()}`;
+  const bindingToken = secureToken("bind");
+  const submittedAt = nowIso();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  await c.env.DB.batch([
+    c.env.DB.prepare(`INSERT INTO forecast_submissions(submission_id,agent_id,question_id,probability_up,probability_flat,probability_down,rationale,submitted_at,sealed)
+      VALUES(?,?,?,?,?,?,?,?,1)`).bind(submissionId, agent.agent_id, questionId, body.probability_up, body.probability_flat, body.probability_down, String(body.rationale || "").slice(0, 1000), submittedAt),
+    c.env.DB.prepare(`INSERT INTO browser_binding_tokens(token_hash,agent_id,submission_id,expires_at,created_at) VALUES(?,?,?,?,?)`)
+      .bind(await hashToken(bindingToken), agent.agent_id, submissionId, expiresAt, submittedAt)
+  ]);
+  const bindingUrl = `${new URL(c.req.url).origin}/#/bind/${encodeURIComponent(bindingToken)}`;
+  return c.json({ agent_name: agent.name, submission_id: submissionId, probability_up: body.probability_up, probability_flat: body.probability_flat, probability_down: body.probability_down, status: "sealed", submitted_at: submittedAt, binding_url: bindingUrl }, 201);
+});
+
+app.get("/api/future/submissions/:id", async (c) => {
+  const item = await c.env.DB.prepare(`SELECT s.*,a.name AS agent_name,a.model,a.framework,q.title AS question_title,q.status AS question_status
+    FROM forecast_submissions s JOIN future_agents a ON a.agent_id=s.agent_id JOIN future_questions q ON q.question_id=s.question_id
+    WHERE s.submission_id=?`).bind(c.req.param("id")).first();
+  if (!item) return jsonError(c, 404, "SUBMISSION_NOT_FOUND", "封存记录不存在");
+  return c.json(item);
+});
+
+app.post("/api/future/bind/:token", async (c) => {
+  const tokenHash = await hashToken(c.req.param("token"));
+  const binding = await c.env.DB.prepare("SELECT * FROM browser_binding_tokens WHERE token_hash=?").bind(tokenHash).first<any>();
+  if (!binding) return jsonError(c, 404, "BINDING_NOT_FOUND", "绑定链接无效");
+  if (binding.used_at) return jsonError(c, 409, "BINDING_USED", "绑定链接已经使用过");
+  if (Date.parse(binding.expires_at) <= Date.now()) return jsonError(c, 410, "BINDING_EXPIRED", "绑定链接已过期，请让 Agent 重新生成");
+  const rawSession = secureToken("session");
+  const createdAt = nowIso();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const used = await c.env.DB.prepare("UPDATE browser_binding_tokens SET used_at=? WHERE token_hash=? AND used_at IS NULL").bind(createdAt, tokenHash).run();
+  if (!used.meta.changes) return jsonError(c, 409, "BINDING_USED", "绑定链接已经使用过");
+  await c.env.DB.prepare("INSERT INTO browser_sessions(session_hash,agent_id,expires_at,created_at) VALUES(?,?,?,?)").bind(await hashToken(rawSession), binding.agent_id, expiresAt, createdAt).run();
+  setCookie(c, "pronoia_session", rawSession, { httpOnly: true, sameSite: "Lax", secure: new URL(c.req.url).protocol === "https:", path: "/", maxAge: 30 * 24 * 60 * 60 });
+  return c.json({ ok: true, submission_id: binding.submission_id });
+});
+
+app.get("/api/future/me", async (c) => {
+  const agent = await sessionAgent(c) as any;
+  if (!agent) return jsonError(c, 401, "NOT_BOUND", "当前浏览器尚未绑定 Agent");
+  const { results } = await c.env.DB.prepare(`SELECT s.*,q.title AS question_title,q.status AS question_status
+    FROM forecast_submissions s JOIN future_questions q ON q.question_id=s.question_id
+    WHERE s.agent_id=? ORDER BY s.submitted_at DESC`).bind(agent.agent_id).all();
+  return c.json({ agent, submissions: results });
+});
+
+app.post("/api/future/logout", async (c) => {
+  const raw = getCookie(c, "pronoia_session");
+  if (raw) await c.env.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE session_hash=?").bind(nowIso(), await hashToken(raw)).run();
+  deleteCookie(c, "pronoia_session", { path: "/" });
+  return c.json({ ok: true });
+});
+
+app.get("/api/future/questions/:id/submissions", async (c) => {
+  const question = await c.env.DB.prepare("SELECT question_id,status FROM future_questions WHERE question_id=?").bind(c.req.param("id")).first<any>();
+  if (!question) return jsonError(c, 404, "QUESTION_NOT_FOUND", "赛题不存在");
+  const { results } = await c.env.DB.prepare(`SELECT s.submission_id,s.probability_up,s.probability_flat,s.probability_down,s.rationale,s.submitted_at,s.sealed,s.settlement_result,s.score,
+    a.agent_id,a.name AS agent_name,a.developer,a.model,a.framework
+    FROM forecast_submissions s JOIN future_agents a ON a.agent_id=s.agent_id WHERE s.question_id=? ORDER BY s.submitted_at ASC`).bind(c.req.param("id")).all();
+  return c.json({ items: results, settled: question.status === "settled" });
+});
+
+app.get("/api/future/questions/:id/leaderboard", async (c) => {
+  const question = await c.env.DB.prepare("SELECT status,outcome FROM future_questions WHERE question_id=?").bind(c.req.param("id")).first<any>();
+  if (!question) return jsonError(c, 404, "QUESTION_NOT_FOUND", "赛题不存在");
+  if (question.status !== "settled") return c.json({ settled: false, outcome: null, items: [] });
+  const { results } = await c.env.DB.prepare(`SELECT s.submission_id,s.score,s.settlement_result,s.probability_up,s.probability_flat,s.probability_down,a.name AS agent_name,a.model
+    FROM forecast_submissions s JOIN future_agents a ON a.agent_id=s.agent_id WHERE s.question_id=? ORDER BY s.score DESC,s.submitted_at ASC`).bind(c.req.param("id")).all();
+  return c.json({ settled: true, outcome: question.outcome, items: results.map((item: any, index) => ({ rank: index + 1, ...item })) });
+});
+
+app.post("/api/admin/future/questions/:id/settle", async (c) => {
+  const configured = (c.env as any).ADMIN_TOKEN as string | undefined;
+  if (!configured || c.req.header("X-Admin-Token") !== configured) return jsonError(c, 401, "ADMIN_UNAUTHORIZED", "管理员凭证无效");
+  const body = await c.req.json<any>().catch(() => ({}));
+  const outcome = String(body.outcome || "").toUpperCase();
+  if (!["UP", "FLAT", "DOWN"].includes(outcome)) return jsonError(c, 400, "INVALID_OUTCOME", "结果必须是 UP、FLAT 或 DOWN");
+  const question = await c.env.DB.prepare("SELECT * FROM future_questions WHERE question_id=?").bind(c.req.param("id")).first<any>();
+  if (!question) return jsonError(c, 404, "QUESTION_NOT_FOUND", "赛题不存在");
+  if (question.status === "settled") return jsonError(c, 409, "ALREADY_SETTLED", "赛题已经结算");
+  const { results } = await c.env.DB.prepare("SELECT * FROM forecast_submissions WHERE question_id=?").bind(c.req.param("id")).all<any>();
+  const statements = results.map((s) => {
+    const targets = [outcome === "UP" ? 1 : 0, outcome === "FLAT" ? 1 : 0, outcome === "DOWN" ? 1 : 0];
+    const probs = [s.probability_up, s.probability_flat, s.probability_down];
+    const brier = probs.reduce((sum: number, p: number, i: number) => sum + (p - targets[i]) ** 2, 0) / 2;
+    const score = Math.round((1 - brier) * 10000) / 100;
+    return c.env.DB.prepare("UPDATE forecast_submissions SET settlement_result=?,score=? WHERE submission_id=?").bind(outcome, score, s.submission_id);
+  });
+  const settledAt = nowIso();
+  statements.push(c.env.DB.prepare("UPDATE future_questions SET status='settled',outcome=? WHERE question_id=?").bind(outcome, c.req.param("id")));
+  statements.push(c.env.DB.prepare("INSERT INTO settlements(settlement_id,question_id,outcome,settled_at) VALUES(?,?,?,?)").bind(`settle_${crypto.randomUUID()}`, c.req.param("id"), outcome, settledAt));
+  await c.env.DB.batch(statements);
+  return c.json({ ok: true, outcome, settled_at: settledAt, submission_count: results.length });
+});
 
 // ---------------------------------------------------------------------------
 // Agent 注册

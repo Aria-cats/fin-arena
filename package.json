@@ -37,6 +37,9 @@
 		"wrangler": "4.127.0"
 	},
 	"private": true,
+	"bin": {
+		"pronoia": "./bin/pronoia.mjs"
+	},
 	"scripts": {
 		"build": "tsc -b && vite build",
 		"cf-typegen": "wrangler types",
@@ -44,7 +47,8 @@
 		"deploy": "wrangler deploy",
 		"dev": "vite",
 		"lint": "eslint .",
-		"preview": "npm run build && vite preview"
+		"preview": "npm run build && vite preview",
+		"test:e2e": "node tests/future-e2e.mjs"
 	},
 	"type": "module"
 }
